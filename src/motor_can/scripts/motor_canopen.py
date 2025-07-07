@@ -282,34 +282,29 @@ class ServoDriveController:
         else:
             self.sensors_status &= ~0x08
         # 前进边缘检测
-        if not self.stop_flag and self.current_status == self.status_list[1]:  # FORWARD
+        # if not self.stop_flag and self.current_status == self.status_list[1]:  # FORWARD
+        if self.current_status == self.status_list[1]:  # FORWARD
             if (msg.distance_a < 30 or msg.distance_b < 30):
-                self.set_target_velocity(2, 0)
-                self.set_target_velocity(3, 0)
-                self.last_left_speed = 0
-                self.last_right_speed = 0
-                # self.current_velocity_brush = 0    #滚刷待定
-                self.current_velocity_low = 0
-                self.current_velocity_up = 0
-                self.publish_state()
-                self.stop_flag = True
-            else:
-                self.stop_flag = False  # 重置停止标志，允许继续前进
+                self.set_state("STOP")
+
+        if self.current_status == self.status_list[2]:  # BACKWARD
+            if (msg.distance_c < 30 or msg.distance_d < 30):
+                self.set_state("STOP")
 
         # # 后退边缘检测
-        if not self.stop_flag and self.current_status == self.status_list[2]:  # BACKWARD
-            if (msg.distance_c < 30 or msg.distance_d < 30):
-                self.set_target_velocity(2, 0)
-                self.set_target_velocity(3, 0)
-                self.last_left_speed = 0
-                self.last_right_speed = 0
-                # self.current_velocity_brush = 0    #滚刷待定
-                self.current_velocity_low = 0
-                self.current_velocity_up = 0
-                self.publish_state()
-                self.stop_flag = True
-            else:
-                self.stop_flag = False
+        # if not self.stop_flag and self.current_status == self.status_list[2]:  # BACKWARD
+        #     if (msg.distance_c < 30 or msg.distance_d < 30):
+        #         self.set_target_velocity(2, 0)
+        #         self.set_target_velocity(3, 0)
+        #         self.last_left_speed = 0
+        #         self.last_right_speed = 0
+        #         # self.current_velocity_brush = 0    #滚刷待定
+        #         self.current_velocity_low = 0
+        #         self.current_velocity_up = 0
+        #         self.publish_state()
+        #         self.stop_flag = True
+        #     else:
+        #         self.stop_flag = False
 
 
         # if (msg.distance_a < 30 or msg.distance_b < 30) and self.current_status == self.status_list[1]:
@@ -332,30 +327,6 @@ class ServoDriveController:
         #     self.set_state("BACKWARD")
         #     rospy.loginfo("保持前进状态")
 
-        # if self.current_status == self.status_list[1] and msg.distance_a < 30:
-        #     self.current_status = self.status_list[0]
-        #     self.publish_state()
-        #     rospy.loginfo("超声波检测触发，切换到停止状态")
-        #     self.last_state = self.current_status
-        # # elif self.current_status == self.status_list[0] and msg.distance_a <= 30:
-        # #     # 条件满足时切换为前进  暂不可行
-        # #     self.current_status = self.status_list[1]
-        # #     self.publish_state()
-        # #     rospy.loginfo("正常前进状态")
-        # #     self.last_state = self.current_status
-        #
-        # #判断后退到边缘状态
-        # if self.current_status == self.status_list[2] and msg.distance_a < 30:
-        #     self.current_status = self.status_list[0]
-        #     self.publish_state()
-        #     rospy.loginfo("超声波检测触发，切换到停止状态")
-        #     self.last_state = self.current_status
-        # # elif self.current_status == self.status_list[0] and msg.distance_a >= 30:
-        # #     # 条件满足时切换为前进  不可行
-        # #     self.current_status = self.status_list[2]
-        # #     self.publish_state()
-        # #     rospy.loginfo("正常后退状态")
-        # #     self.last_state = self.current_status
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
