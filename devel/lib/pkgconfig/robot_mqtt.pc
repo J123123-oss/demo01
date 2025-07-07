@@ -1,8 +1,0 @@
-prefix=/home/ubuntu/demo01/devel
-
-Name: robot_mqtt
-Description: Description of robot_mqtt
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
