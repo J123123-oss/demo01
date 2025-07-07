@@ -11,10 +11,15 @@ sudo chmod 777 /dev/ttyUSB0
 #香橙派设置
 # cd /home/orangepi/demo01 
 #虚拟机设置
-cd /home/ubuntu/demo01
+sudo modprobe vcan
+sudo ip link add dev vcan0 type vcan
+sudo ip link set vcan0 up
+# roscore &
 
+#进入工作空间启动launch
+cd /home/ubuntu/demo01
 source devel/setup.bash
-roslaunch motor_can run.launch
+roslaunch motor_can run.launch &
 
 
 
