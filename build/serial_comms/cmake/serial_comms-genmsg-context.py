@@ -1,6 +1,6 @@
 # generated from genmsg/cmake/pkg-genmsg.context.in
 
-messages_str = "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
+messages_str = "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg;/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
 services_str = ""
 pkg_name = "serial_comms"
 dependencies_str = "std_msgs"

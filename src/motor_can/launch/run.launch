@@ -11,4 +11,5 @@
         <!-- <param name="port" value="/dev/ttyUSB0"/> -->
         <!-- <param name="baudrate" value="115200"/> -->
     </node>    
+    <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen"/>
 </launch>

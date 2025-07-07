@@ -3,5 +3,7 @@
   (:export
    "<DISTANCES>"
    "DISTANCES"
+   "<INSPVAE>"
+   "INSPVAE"
   ))
 

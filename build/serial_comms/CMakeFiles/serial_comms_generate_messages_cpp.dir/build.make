@@ -54,6 +54,7 @@ CMAKE_BINARY_DIR = /home/ubuntu/demo01/build
 include serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/progress.make
 
 serial_comms/CMakeFiles/serial_comms_generate_messages_cpp: /home/ubuntu/demo01/devel/include/serial_comms/Distances.h
+serial_comms/CMakeFiles/serial_comms_generate_messages_cpp: /home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h
 
 
 /home/ubuntu/demo01/devel/include/serial_comms/Distances.h: /opt/ros/noetic/lib/gencpp/gen_cpp.py
@@ -62,8 +63,16 @@ serial_comms/CMakeFiles/serial_comms_generate_messages_cpp: /home/ubuntu/demo01/
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating C++ code from serial_comms/Distances.msg"
 	cd /home/ubuntu/demo01/src/serial_comms && /home/ubuntu/demo01/build/catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/gencpp/cmake/../../../lib/gencpp/gen_cpp.py /home/ubuntu/demo01/src/serial_comms/msg/Distances.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/include/serial_comms -e /opt/ros/noetic/share/gencpp/cmake/..
 
+/home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h: /opt/ros/noetic/lib/gencpp/gen_cpp.py
+/home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h: /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg
+/home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h: /opt/ros/noetic/share/std_msgs/msg/Header.msg
+/home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h: /opt/ros/noetic/share/gencpp/msg.h.template
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating C++ code from serial_comms/INSPVAE.msg"
+	cd /home/ubuntu/demo01/src/serial_comms && /home/ubuntu/demo01/build/catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/gencpp/cmake/../../../lib/gencpp/gen_cpp.py /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/include/serial_comms -e /opt/ros/noetic/share/gencpp/cmake/..
+
 serial_comms_generate_messages_cpp: serial_comms/CMakeFiles/serial_comms_generate_messages_cpp
 serial_comms_generate_messages_cpp: /home/ubuntu/demo01/devel/include/serial_comms/Distances.h
+serial_comms_generate_messages_cpp: /home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h
 serial_comms_generate_messages_cpp: serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/build.make
 
 .PHONY : serial_comms_generate_messages_cpp

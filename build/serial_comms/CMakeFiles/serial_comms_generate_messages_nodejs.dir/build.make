@@ -54,6 +54,7 @@ CMAKE_BINARY_DIR = /home/ubuntu/demo01/build
 include serial_comms/CMakeFiles/serial_comms_generate_messages_nodejs.dir/progress.make
 
 serial_comms/CMakeFiles/serial_comms_generate_messages_nodejs: /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/Distances.js
+serial_comms/CMakeFiles/serial_comms_generate_messages_nodejs: /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/INSPVAE.js
 
 
 /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/Distances.js: /opt/ros/noetic/lib/gennodejs/gen_nodejs.py
@@ -61,8 +62,15 @@ serial_comms/CMakeFiles/serial_comms_generate_messages_nodejs: /home/ubuntu/demo
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating Javascript code from serial_comms/Distances.msg"
 	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/gennodejs/cmake/../../../lib/gennodejs/gen_nodejs.py /home/ubuntu/demo01/src/serial_comms/msg/Distances.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg
 
+/home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/INSPVAE.js: /opt/ros/noetic/lib/gennodejs/gen_nodejs.py
+/home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/INSPVAE.js: /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg
+/home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/INSPVAE.js: /opt/ros/noetic/share/std_msgs/msg/Header.msg
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating Javascript code from serial_comms/INSPVAE.msg"
+	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/gennodejs/cmake/../../../lib/gennodejs/gen_nodejs.py /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg
+
 serial_comms_generate_messages_nodejs: serial_comms/CMakeFiles/serial_comms_generate_messages_nodejs
 serial_comms_generate_messages_nodejs: /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/Distances.js
+serial_comms_generate_messages_nodejs: /home/ubuntu/demo01/devel/share/gennodejs/ros/serial_comms/msg/INSPVAE.js
 serial_comms_generate_messages_nodejs: serial_comms/CMakeFiles/serial_comms_generate_messages_nodejs.dir/build.make
 
 .PHONY : serial_comms_generate_messages_nodejs

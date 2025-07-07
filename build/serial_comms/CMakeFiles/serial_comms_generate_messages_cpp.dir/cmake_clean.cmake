@@ -1,5 +1,6 @@
 file(REMOVE_RECURSE
   "/home/ubuntu/demo01/devel/include/serial_comms/Distances.h"
+  "/home/ubuntu/demo01/devel/include/serial_comms/INSPVAE.h"
   "CMakeFiles/serial_comms_generate_messages_cpp"
 )
 

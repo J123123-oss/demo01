@@ -4,7 +4,7 @@ import rospy
 from std_msgs.msg import String
 
 class MQTTClient:
-    def __init__(self, broker, port, topic, client_id, ca_cert=None):
+    def __init__(self, broker, port, topic_status, topic_cmd, client_id, ca_cert=None):
         """
         Initialize MQTT Client
         
@@ -17,24 +17,25 @@ class MQTTClient:
         """
         self.broker = broker
         self.port = port
-        self.topic = topic
+        self.topic_status = topic_status  # ROS状态发布到MQTT
+        self.topic_cmd = topic_cmd        # MQTT控制指令下发到ROS
         self.client_id = client_id
         self.ca_cert = ca_cert
         self.ros_cmd_pub = None
-        
+
         # Create client instance (using V2 API)
         self.client = mqtt.Client(
             client_id=self.client_id, 
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2
         )
-        
+
         # Setup callbacks
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
         self.client.on_message = self.on_message
         self.client.on_subscribe = self.on_subscribe
         self.client.on_publish = self.on_publish
-        
+
         # Setup TLS
         self.client.tls_set(
             ca_certs=self.ca_cert, 
@@ -45,14 +46,11 @@ class MQTTClient:
     # MQTT Callback Methods (V2 version)
     # =========================================================
     def on_connect(self, client, userdata, flags, reason_code, properties):
-        """Connection callback (V2 version)"""
-        print(f"\n[状态] 服务器连接结果: {mqtt.connack_string(reason_code)}")
-        if reason_code == mqtt.MQTT_ERR_SUCCESS:
-            print(f"  ├─ 订阅主题: {self.topic}")
-            client.subscribe(self.topic, qos=1)
-            
-            print(f"  └─ 发布测试消息到 {self.topic}")
-            client.publish(self.topic, "Hello from Python MQTT client!", qos=1)
+            print(f"\n[状态] 服务器连接结果: {mqtt.connack_string(reason_code)}")
+            if reason_code == mqtt.MQTT_ERR_SUCCESS:
+                print(f"  ├─ 订阅主题: {self.topic_cmd}")
+                client.subscribe(self.topic_cmd, qos=1)
+                client.subscribe(self.topic_status, qos=1)
 
     def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         """Disconnection callback (V2 version)"""
@@ -63,7 +61,8 @@ class MQTTClient:
     def on_message(self, client, userdata, msg):
         """Message received callback"""
         print(f"\n[收到消息] \n  ├─ 主题: {msg.topic}\n  ├─ QoS: {msg.qos}\n  └─ 内容: {msg.payload.decode()}")
-        if self.ros_cmd_pub:
+        # 只处理控制指令主题
+        if msg.topic == self.topic_cmd and self.ros_cmd_pub:
             ros_msg = String()
             ros_msg.data = msg.payload.decode()
             self.ros_cmd_pub.publish(ros_msg)
@@ -93,7 +92,7 @@ class MQTTClient:
             self.client.connect(self.broker, self.port, keepalive)
             print(f"✅ 连接成功!")
             print(f"  ├─ 客户端ID: {self.client_id}")
-            print(f"  └─ 测试主题: {self.topic}")
+            print(f"  └─ 测试主题: {self.topic_cmd}")
             print("=" * 50)
             return True
         except Exception as e:
@@ -104,11 +103,9 @@ class MQTTClient:
         """Start the MQTT client"""
         # 启动ROS节点
         rospy.init_node("mqtt_ros_bridge", anonymous=True)
-        # 订阅robot_state话题
+        # 订阅robot_state话题，发布到MQTT状态主题
         rospy.Subscriber("robot_state", String, self.ros_robot_state_callback)
-        
         self.ros_cmd_pub = rospy.Publisher("robot_cmd", String, queue_size=10)
-        
         self.client.loop_start()
         try:
             print("🚀 运行中 (CTRL+C 退出)...")
@@ -131,8 +128,8 @@ class MQTTClient:
     def ros_robot_state_callback(self, msg):
         """ROS回调：收到robot_state话题后发布到MQTT并打印"""
         print(f"[ROS] 收到robot_state: {msg.data}")
-        # 可选：发布到MQTT
-        self.publish(self.topic, msg.data)
+        # 只发布到MQTT状态主题
+        self.publish(self.topic_status, msg.data)
     
 
 
@@ -141,7 +138,8 @@ if __name__ == "__main__":
     config = {
         "broker": "129.211.16.114",
         "port": 8883,
-        "topic": "robot/status",
+        "topic_status": "robot/status",  # ROS状态发布到MQTT
+        "topic_cmd": "robot/cmd",        # MQTT控制指令下发到ROS
         "client_id": "python-mqtt-client-v2",
         "ca_cert": None
     }

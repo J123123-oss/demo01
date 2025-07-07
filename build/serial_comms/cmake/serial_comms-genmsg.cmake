@@ -1,6 +1,6 @@
 # generated from genmsg/cmake/pkg-genmsg.cmake.em
 
-message(STATUS "serial_comms: 1 messages, 0 services")
+message(STATUS "serial_comms: 2 messages, 0 services")
 
 set(MSG_I_FLAGS "-Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg;-Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg")
 
@@ -22,6 +22,11 @@ add_custom_target(_serial_comms_generate_messages_check_deps_${_filename}
   COMMAND ${CATKIN_ENV} ${PYTHON_EXECUTABLE} ${GENMSG_CHECK_DEPS_SCRIPT} "serial_comms" "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg" ""
 )
 
+get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" NAME_WE)
+add_custom_target(_serial_comms_generate_messages_check_deps_${_filename}
+  COMMAND ${CATKIN_ENV} ${PYTHON_EXECUTABLE} ${GENMSG_CHECK_DEPS_SCRIPT} "serial_comms" "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" "std_msgs/Header"
+)
+
 #
 #  langs = gencpp;geneus;genlisp;gennodejs;genpy
 #
@@ -32,6 +37,12 @@ _generate_msg_cpp(serial_comms
   "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
   "${MSG_I_FLAGS}"
   ""
+  ${CATKIN_DEVEL_PREFIX}/${gencpp_INSTALL_DIR}/serial_comms
+)
+_generate_msg_cpp(serial_comms
+  "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
+  "${MSG_I_FLAGS}"
+  "/opt/ros/noetic/share/std_msgs/cmake/../msg/Header.msg"
   ${CATKIN_DEVEL_PREFIX}/${gencpp_INSTALL_DIR}/serial_comms
 )
 
@@ -51,6 +62,8 @@ add_dependencies(serial_comms_generate_messages serial_comms_generate_messages_c
 # add dependencies to all check dependencies targets
 get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg" NAME_WE)
 add_dependencies(serial_comms_generate_messages_cpp _serial_comms_generate_messages_check_deps_${_filename})
+get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" NAME_WE)
+add_dependencies(serial_comms_generate_messages_cpp _serial_comms_generate_messages_check_deps_${_filename})
 
 # target for backward compatibility
 add_custom_target(serial_comms_gencpp)
@@ -65,6 +78,12 @@ _generate_msg_eus(serial_comms
   "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
   "${MSG_I_FLAGS}"
   ""
+  ${CATKIN_DEVEL_PREFIX}/${geneus_INSTALL_DIR}/serial_comms
+)
+_generate_msg_eus(serial_comms
+  "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
+  "${MSG_I_FLAGS}"
+  "/opt/ros/noetic/share/std_msgs/cmake/../msg/Header.msg"
   ${CATKIN_DEVEL_PREFIX}/${geneus_INSTALL_DIR}/serial_comms
 )
 
@@ -84,6 +103,8 @@ add_dependencies(serial_comms_generate_messages serial_comms_generate_messages_e
 # add dependencies to all check dependencies targets
 get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg" NAME_WE)
 add_dependencies(serial_comms_generate_messages_eus _serial_comms_generate_messages_check_deps_${_filename})
+get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" NAME_WE)
+add_dependencies(serial_comms_generate_messages_eus _serial_comms_generate_messages_check_deps_${_filename})
 
 # target for backward compatibility
 add_custom_target(serial_comms_geneus)
@@ -98,6 +119,12 @@ _generate_msg_lisp(serial_comms
   "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
   "${MSG_I_FLAGS}"
   ""
+  ${CATKIN_DEVEL_PREFIX}/${genlisp_INSTALL_DIR}/serial_comms
+)
+_generate_msg_lisp(serial_comms
+  "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
+  "${MSG_I_FLAGS}"
+  "/opt/ros/noetic/share/std_msgs/cmake/../msg/Header.msg"
   ${CATKIN_DEVEL_PREFIX}/${genlisp_INSTALL_DIR}/serial_comms
 )
 
@@ -117,6 +144,8 @@ add_dependencies(serial_comms_generate_messages serial_comms_generate_messages_l
 # add dependencies to all check dependencies targets
 get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg" NAME_WE)
 add_dependencies(serial_comms_generate_messages_lisp _serial_comms_generate_messages_check_deps_${_filename})
+get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" NAME_WE)
+add_dependencies(serial_comms_generate_messages_lisp _serial_comms_generate_messages_check_deps_${_filename})
 
 # target for backward compatibility
 add_custom_target(serial_comms_genlisp)
@@ -131,6 +160,12 @@ _generate_msg_nodejs(serial_comms
   "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
   "${MSG_I_FLAGS}"
   ""
+  ${CATKIN_DEVEL_PREFIX}/${gennodejs_INSTALL_DIR}/serial_comms
+)
+_generate_msg_nodejs(serial_comms
+  "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
+  "${MSG_I_FLAGS}"
+  "/opt/ros/noetic/share/std_msgs/cmake/../msg/Header.msg"
   ${CATKIN_DEVEL_PREFIX}/${gennodejs_INSTALL_DIR}/serial_comms
 )
 
@@ -150,6 +185,8 @@ add_dependencies(serial_comms_generate_messages serial_comms_generate_messages_n
 # add dependencies to all check dependencies targets
 get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg" NAME_WE)
 add_dependencies(serial_comms_generate_messages_nodejs _serial_comms_generate_messages_check_deps_${_filename})
+get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" NAME_WE)
+add_dependencies(serial_comms_generate_messages_nodejs _serial_comms_generate_messages_check_deps_${_filename})
 
 # target for backward compatibility
 add_custom_target(serial_comms_gennodejs)
@@ -164,6 +201,12 @@ _generate_msg_py(serial_comms
   "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
   "${MSG_I_FLAGS}"
   ""
+  ${CATKIN_DEVEL_PREFIX}/${genpy_INSTALL_DIR}/serial_comms
+)
+_generate_msg_py(serial_comms
+  "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
+  "${MSG_I_FLAGS}"
+  "/opt/ros/noetic/share/std_msgs/cmake/../msg/Header.msg"
   ${CATKIN_DEVEL_PREFIX}/${genpy_INSTALL_DIR}/serial_comms
 )
 
@@ -182,6 +225,8 @@ add_dependencies(serial_comms_generate_messages serial_comms_generate_messages_p
 
 # add dependencies to all check dependencies targets
 get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg" NAME_WE)
+add_dependencies(serial_comms_generate_messages_py _serial_comms_generate_messages_check_deps_${_filename})
+get_filename_component(_filename "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg" NAME_WE)
 add_dependencies(serial_comms_generate_messages_py _serial_comms_generate_messages_check_deps_${_filename})
 
 # target for backward compatibility

@@ -1,5 +1,6 @@
 file(REMOVE_RECURSE
   "/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_Distances.py"
+  "/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py"
   "/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/__init__.py"
   "CMakeFiles/serial_comms_generate_messages_py"
 )

@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE
   "/home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/manifest.l"
   "/home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/Distances.l"
+  "/home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/INSPVAE.l"
   "CMakeFiles/serial_comms_generate_messages_eus"
 )
 

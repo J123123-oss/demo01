@@ -38,7 +38,10 @@ if(NOT DEFINED CMAKE_CROSSCOMPILING)
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/serial_comms/msg" TYPE FILE FILES "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/serial_comms/msg" TYPE FILE FILES
+    "/home/ubuntu/demo01/src/serial_comms/msg/Distances.msg"
+    "/home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg"
+    )
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)

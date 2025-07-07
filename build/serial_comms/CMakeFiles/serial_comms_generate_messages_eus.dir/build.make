@@ -54,6 +54,7 @@ CMAKE_BINARY_DIR = /home/ubuntu/demo01/build
 include serial_comms/CMakeFiles/serial_comms_generate_messages_eus.dir/progress.make
 
 serial_comms/CMakeFiles/serial_comms_generate_messages_eus: /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/Distances.l
+serial_comms/CMakeFiles/serial_comms_generate_messages_eus: /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/INSPVAE.l
 serial_comms/CMakeFiles/serial_comms_generate_messages_eus: /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/manifest.l
 
 
@@ -62,12 +63,19 @@ serial_comms/CMakeFiles/serial_comms_generate_messages_eus: /home/ubuntu/demo01/
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating EusLisp code from serial_comms/Distances.msg"
 	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/geneus/cmake/../../../lib/geneus/gen_eus.py /home/ubuntu/demo01/src/serial_comms/msg/Distances.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg
 
+/home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/INSPVAE.l: /opt/ros/noetic/lib/geneus/gen_eus.py
+/home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/INSPVAE.l: /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg
+/home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/INSPVAE.l: /opt/ros/noetic/share/std_msgs/msg/Header.msg
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating EusLisp code from serial_comms/INSPVAE.msg"
+	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/geneus/cmake/../../../lib/geneus/gen_eus.py /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg
+
 /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/manifest.l: /opt/ros/noetic/lib/geneus/gen_eus.py
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating EusLisp manifest code for serial_comms"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Generating EusLisp manifest code for serial_comms"
 	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/geneus/cmake/../../../lib/geneus/gen_eus.py -m -o /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms serial_comms std_msgs
 
 serial_comms_generate_messages_eus: serial_comms/CMakeFiles/serial_comms_generate_messages_eus
 serial_comms_generate_messages_eus: /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/Distances.l
+serial_comms_generate_messages_eus: /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/msg/INSPVAE.l
 serial_comms_generate_messages_eus: /home/ubuntu/demo01/devel/share/roseus/ros/serial_comms/manifest.l
 serial_comms_generate_messages_eus: serial_comms/CMakeFiles/serial_comms_generate_messages_eus.dir/build.make
 

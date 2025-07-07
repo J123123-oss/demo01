@@ -51,6 +51,8 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   Distances.msg
+  INSPVAE.msg
+
   # Message2.msg
 )
 

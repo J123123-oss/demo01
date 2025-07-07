@@ -100,6 +100,17 @@ install/fast: preinstall/fast
 	/usr/bin/cmake -P cmake_install.cmake
 .PHONY : install/fast
 
+# Special rule for the target test
+test:
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
+	/usr/bin/ctest --force-new-ctest-process $(ARGS)
+.PHONY : test
+
+# Special rule for the target test
+test/fast: test
+
+.PHONY : test/fast
+
 # Special rule for the target install/local
 install/local: preinstall
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing only the local directory..."
@@ -111,17 +122,6 @@ install/local/fast: preinstall/fast
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing only the local directory..."
 	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
 .PHONY : install/local/fast
-
-# Special rule for the target test
-test:
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
-	/usr/bin/ctest --force-new-ctest-process $(ARGS)
-.PHONY : test
-
-# Special rule for the target test
-test/fast: test
-
-.PHONY : test/fast
 
 # Special rule for the target install/strip
 install/strip: preinstall
@@ -213,6 +213,21 @@ _serial_comms_generate_messages_check_deps_Distances/fast:
 .PHONY : _serial_comms_generate_messages_check_deps_Distances/fast
 
 # Convenience name for target.
+serial_comms/CMakeFiles/_serial_comms_generate_messages_check_deps_INSPVAE.dir/rule:
+	cd /home/ubuntu/demo01/build && $(MAKE) -f CMakeFiles/Makefile2 serial_comms/CMakeFiles/_serial_comms_generate_messages_check_deps_INSPVAE.dir/rule
+.PHONY : serial_comms/CMakeFiles/_serial_comms_generate_messages_check_deps_INSPVAE.dir/rule
+
+# Convenience name for target.
+_serial_comms_generate_messages_check_deps_INSPVAE: serial_comms/CMakeFiles/_serial_comms_generate_messages_check_deps_INSPVAE.dir/rule
+
+.PHONY : _serial_comms_generate_messages_check_deps_INSPVAE
+
+# fast build rule for target.
+_serial_comms_generate_messages_check_deps_INSPVAE/fast:
+	cd /home/ubuntu/demo01/build && $(MAKE) -f serial_comms/CMakeFiles/_serial_comms_generate_messages_check_deps_INSPVAE.dir/build.make serial_comms/CMakeFiles/_serial_comms_generate_messages_check_deps_INSPVAE.dir/build
+.PHONY : _serial_comms_generate_messages_check_deps_INSPVAE/fast
+
+# Convenience name for target.
 serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/rule:
 	cd /home/ubuntu/demo01/build && $(MAKE) -f CMakeFiles/Makefile2 serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/rule
 .PHONY : serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/rule
@@ -226,6 +241,21 @@ serial_comms_generate_messages_cpp: serial_comms/CMakeFiles/serial_comms_generat
 serial_comms_generate_messages_cpp/fast:
 	cd /home/ubuntu/demo01/build && $(MAKE) -f serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/build.make serial_comms/CMakeFiles/serial_comms_generate_messages_cpp.dir/build
 .PHONY : serial_comms_generate_messages_cpp/fast
+
+# Convenience name for target.
+serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule:
+	cd /home/ubuntu/demo01/build && $(MAKE) -f CMakeFiles/Makefile2 serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule
+.PHONY : serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule
+
+# Convenience name for target.
+serial_comms_gencpp: serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule
+
+.PHONY : serial_comms_gencpp
+
+# fast build rule for target.
+serial_comms_gencpp/fast:
+	cd /home/ubuntu/demo01/build && $(MAKE) -f serial_comms/CMakeFiles/serial_comms_gencpp.dir/build.make serial_comms/CMakeFiles/serial_comms_gencpp.dir/build
+.PHONY : serial_comms_gencpp/fast
 
 # Convenience name for target.
 serial_comms/CMakeFiles/serial_comms_generate_messages_eus.dir/rule:
@@ -303,21 +333,6 @@ serial_comms_genlisp/fast:
 .PHONY : serial_comms_genlisp/fast
 
 # Convenience name for target.
-serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule:
-	cd /home/ubuntu/demo01/build && $(MAKE) -f CMakeFiles/Makefile2 serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule
-.PHONY : serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule
-
-# Convenience name for target.
-serial_comms_gencpp: serial_comms/CMakeFiles/serial_comms_gencpp.dir/rule
-
-.PHONY : serial_comms_gencpp
-
-# fast build rule for target.
-serial_comms_gencpp/fast:
-	cd /home/ubuntu/demo01/build && $(MAKE) -f serial_comms/CMakeFiles/serial_comms_gencpp.dir/build.make serial_comms/CMakeFiles/serial_comms_gencpp.dir/build
-.PHONY : serial_comms_gencpp/fast
-
-# Convenience name for target.
 serial_comms/CMakeFiles/serial_comms_generate_messages_py.dir/rule:
 	cd /home/ubuntu/demo01/build && $(MAKE) -f CMakeFiles/Makefile2 serial_comms/CMakeFiles/serial_comms_generate_messages_py.dir/rule
 .PHONY : serial_comms/CMakeFiles/serial_comms_generate_messages_py.dir/rule
@@ -359,16 +374,17 @@ help:
 	@echo "... serial_comms_generate_messages"
 	@echo "... serial_comms_gennodejs"
 	@echo "... _serial_comms_generate_messages_check_deps_Distances"
+	@echo "... _serial_comms_generate_messages_check_deps_INSPVAE"
 	@echo "... install"
 	@echo "... serial_comms_generate_messages_cpp"
+	@echo "... test"
+	@echo "... serial_comms_gencpp"
 	@echo "... serial_comms_generate_messages_eus"
 	@echo "... install/local"
 	@echo "... serial_comms_geneus"
 	@echo "... serial_comms_generate_messages_nodejs"
 	@echo "... serial_comms_generate_messages_lisp"
 	@echo "... serial_comms_genlisp"
-	@echo "... serial_comms_gencpp"
-	@echo "... test"
 	@echo "... serial_comms_generate_messages_py"
 	@echo "... install/strip"
 	@echo "... serial_comms_genpy"

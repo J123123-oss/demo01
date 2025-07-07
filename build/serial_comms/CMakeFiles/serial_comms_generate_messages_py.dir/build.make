@@ -54,6 +54,7 @@ CMAKE_BINARY_DIR = /home/ubuntu/demo01/build
 include serial_comms/CMakeFiles/serial_comms_generate_messages_py.dir/progress.make
 
 serial_comms/CMakeFiles/serial_comms_generate_messages_py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_Distances.py
+serial_comms/CMakeFiles/serial_comms_generate_messages_py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py
 serial_comms/CMakeFiles/serial_comms_generate_messages_py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/__init__.py
 
 
@@ -62,13 +63,21 @@ serial_comms/CMakeFiles/serial_comms_generate_messages_py: /home/ubuntu/demo01/d
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating Python from MSG serial_comms/Distances"
 	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/genpy/cmake/../../../lib/genpy/genmsg_py.py /home/ubuntu/demo01/src/serial_comms/msg/Distances.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg
 
+/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py: /opt/ros/noetic/lib/genpy/genmsg_py.py
+/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py: /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg
+/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py: /opt/ros/noetic/share/std_msgs/msg/Header.msg
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating Python from MSG serial_comms/INSPVAE"
+	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/genpy/cmake/../../../lib/genpy/genmsg_py.py /home/ubuntu/demo01/src/serial_comms/msg/INSPVAE.msg -Iserial_comms:/home/ubuntu/demo01/src/serial_comms/msg -Istd_msgs:/opt/ros/noetic/share/std_msgs/cmake/../msg -p serial_comms -o /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg
+
 /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/__init__.py: /opt/ros/noetic/lib/genpy/genmsg_py.py
 /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/__init__.py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_Distances.py
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating Python msg __init__.py for serial_comms"
+/home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/__init__.py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/home/ubuntu/demo01/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Generating Python msg __init__.py for serial_comms"
 	cd /home/ubuntu/demo01/build/serial_comms && ../catkin_generated/env_cached.sh /usr/bin/python3 /opt/ros/noetic/share/genpy/cmake/../../../lib/genpy/genmsg_py.py -o /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg --initpy
 
 serial_comms_generate_messages_py: serial_comms/CMakeFiles/serial_comms_generate_messages_py
 serial_comms_generate_messages_py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_Distances.py
+serial_comms_generate_messages_py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/_INSPVAE.py
 serial_comms_generate_messages_py: /home/ubuntu/demo01/devel/lib/python3/dist-packages/serial_comms/msg/__init__.py
 serial_comms_generate_messages_py: serial_comms/CMakeFiles/serial_comms_generate_messages_py.dir/build.make
 

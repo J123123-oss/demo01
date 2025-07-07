@@ -53,10 +53,6 @@ if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_
 endif()
 
 if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/robot_mqtt" TYPE PROGRAM FILES "/home/ubuntu/demo01/build/robot_mqtt/catkin_generated/installspace/mqtt_test.py")
-endif()
-
-if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/robot_mqtt" TYPE PROGRAM FILES "/home/ubuntu/demo01/build/robot_mqtt/catkin_generated/installspace/mqtt_0526_mod.py")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/robot_mqtt" TYPE PROGRAM FILES "/home/ubuntu/demo01/build/robot_mqtt/catkin_generated/installspace/mqtt_test2.py")
 endif()
 
