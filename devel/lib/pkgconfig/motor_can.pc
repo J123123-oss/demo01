@@ -1,0 +1,8 @@
+prefix=/home/ubuntu/demo01/devel
+
+Name: motor_can
+Description: Description of motor_can
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

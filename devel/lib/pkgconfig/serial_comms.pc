@@ -1,0 +1,8 @@
+prefix=/home/ubuntu/demo01/devel
+
+Name: serial_comms
+Description: Description of serial_comms
+Version: 0.0.0
+Cflags: -I/home/ubuntu/demo01/devel/include
+Libs: -L${prefix}/lib 
+Requires: roscpp rospy std_msgs message_runtime

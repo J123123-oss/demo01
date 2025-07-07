@@ -1,0 +1,14 @@
+<launch>
+    <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
+        <!-- <param name="servo_config" value="$(find motor_can)/config/servo_config.yaml"/> -->
+        <!-- <param name="can_interface" value="can0"/> -->
+    </node>
+    <node pkg="robot_mqtt" type="mqtt_test.py" name="mqtt_test_node" >
+        <!-- <param name="mqtt_broker" value="localhost"/> -->
+        <!-- <param name="mqtt_port" value="1883"/> -->
+    </node>
+    <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen">
+        <!-- <param name="port" value="/dev/ttyUSB0"/> -->
+        <!-- <param name="baudrate" value="115200"/> -->
+    </node>    
+</launch>
