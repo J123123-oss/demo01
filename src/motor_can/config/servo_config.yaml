@@ -1,17 +1,16 @@
-# 电机配置列表输入RPM转换为脉冲/秒
-# 1 RPM = 166.66 脉冲/秒 (假设每转
+# 电机配置列表输入脉冲数
 motors:
-  - id: 2      # 靠近工控机电机ID(1-127)
-    velocity: 0  # 目标速度(RPM)
-    acceleration: 200 # 加速度 (脉冲/s²)
-    deceleration: 200 # 减速度 (脉冲/s²)
+  - id: 2      # 靠近工控机LOW电机ID(1-127)
+    pluse: 0  # 后续调整，发1脉冲最终走18.85mm
+    acceleration: 2710 # 加速度 (脉冲/s²)
+    deceleration: 4E20 # 减速度 (脉冲/s²)
 
-  - id: 3      # 远离工控机电机ID
-    velocity: 0  # 目标速度
-    acceleration: 200 # 加速度
-    deceleration: 200 # 减速度
+  - id: 3      # 远离工控机UP电机ID
+    pluse: 0  # 651883
+    acceleration: 2710 # 加速度
+    deceleration: 4E20 # 减速度
   
   - id: 4      # 滚刷电机ID
-    velocity: 0  # 目标速度  1600 RPM
-    acceleration: 500 # 加速度
-    deceleration: 500 # 减速度
+    pluse: 0  # 目标速度  1600 RPM
+    acceleration: 2710 # 加速度
+    deceleration: 4E20 # 减速度

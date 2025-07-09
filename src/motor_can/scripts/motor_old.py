@@ -258,7 +258,7 @@ class ServoDriveController:
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
-        if self.current_status in ["FORWARD", "BACKWARD"] and -15 < self.imu_yaw < 15:
+        if self.current_status in ["FORWARD", "BACKWARD","START"] and -10 < self.imu_yaw < 10:
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
