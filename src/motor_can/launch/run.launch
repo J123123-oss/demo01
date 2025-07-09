@@ -7,9 +7,9 @@
         <!-- <param name="mqtt_broker" value="localhost"/> -->
         <!-- <param name="mqtt_port" value="1883"/> -->
     </node>
-    <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen">
+    <!-- <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen"> -->
         <!-- <param name="port" value="/dev/ttyUSB0"/> -->
         <!-- <param name="baudrate" value="115200"/> -->
-    </node>    
+    <!-- </node>     -->
     <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen"/>
 </launch>

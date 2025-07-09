@@ -11,53 +11,43 @@ import sys
 import select
 # import os
 
-# rate = 68  #   速度模式 166.66>> 68.26
-rate = 1  # 位置模式   后续调整发4096脉冲最终走18.85mm
+rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    #def __init__(self, channel='vcan0', interface='socketcan'):
-    def __init__(self, channel='can0', interface='socketcan'):
+    def __init__(self, channel='vcan0', interface='socketcan'):
+    # def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         #设置状态列表
         self.status_list = [
-            "START",  # 启动状态
             "STOP",  # 停止状态
             "FORWARD",  # 前进状态
             "BACKWARD",  # 后退状态
-            "ROLLER_ACCEL",# 滚刷加速状态
-            "ROLLER_DECEL"  # 滚刷减速状态
+            "START",  # 位置模式自动运行状态
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
-            "START": {  # 启动状态
-                "velocity_up": 0,
-                "velocity_low": 0,
-                "velocity_brush": 3000 * rate
+            "START": {  # 位置模式自动运行状态
+                "position_left": 651883,  # 左侧电机目标位置 由300cm转换而来
+                "position_right": -651883,  # 右侧电机目标位置
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
+                "velocity_brush": -1500 * rate #后续添加距离到位后反转的判断
             },
+
             "STOP": {  # 停止状态
                 "velocity_up": 0,
                 "velocity_low": 0,
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": 217294,
-                "velocity_low": 217294 * rate,
-                "velocity_brush": 3000 * rate
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
+                "velocity_brush": -1500 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -217294 * rate,
-                "velocity_low": -217294 * rate,
-                "velocity_brush": -3000 * rate
-            },
-            "ROLLER_ACCEL": {  # 滚刷加速状态
-                "velocity_up": self.last_left_speed,
-                "velocity_low": self.last_right_speed,
-                "velocity_brush": (self.last_brush_speed + 1000 * rate ) if self.last_brush_speed is not None else 0
-            },
-            "ROLLER_DECEL": {  # 滚刷减速状态       
-                "velocity_up": self.last_left_speed,
-                "velocity_low": self.last_right_speed,
-                "velocity_brush": (self.last_brush_speed - 1000 * rate ) if self.last_brush_speed is not None else 0
+                "velocity_up": -250 * rate,
+                "velocity_low": 250 * rate,
+                "velocity_brush": 1500 * rate
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -69,10 +59,17 @@ class ServoDriveController:
         self.last_right_speed = None
         self.last_brush_speed = None
         self.stop_flag = False   
-
+        self.position_engaged = False           # 标记位置模式是否已激活
+        self.position_mode_configured = False  # 标记位置模式是否已配置
+        self.left_position = 0
+        self.right_position = 0
+        self.forward_target = self.status_config["START"]["position_left"]
+        self.backward_target = -self.status_config["START"]["position_left"]
+        self.position_direction = 1  # 1: forward, -1: backward
 
         self.stop_velocity = 0  # 停止速度
         self.imu_yaw = 0.0  # IMU偏航角 单位度
+        self.initial_yaw = None
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
 
@@ -86,7 +83,7 @@ class ServoDriveController:
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
-        rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
+        # rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
 
     def set_state(self, new_state):
         if new_state not in self.status_config:
@@ -94,46 +91,30 @@ class ServoDriveController:
             return False
         if new_state == self.current_status:
             return False  # 状态未改变
+         # 状态改变时重置位置模式标志
+        if new_state == "START":
+            self.position_engaged = False
+            self.position_mode_configured = False
+
         self.current_status = new_state
         self.last_state = self.current_status
         rospy.loginfo(f"状态已更新为: {self.current_status}")
         return True
-
-
-    def publish_state(self):
-        """发布机器人状态信息，包含速度和状态"""
-        state_msg = {
-            "status": self.current_status,
-            "velocity_up": self.current_velocity_up / rate,  # 单位为脉冲数
-            "velocity_low": self.current_velocity_low / rate,
-            "velocity_brush": self.current_velocity_brush / rate,
-            "imu_yaw": self.imu_yaw,  # IMU偏航角
-            "sensors_status": self.sensors_status,  # 超声波传感器状态
-            "timestamp": time.time()
-        }
-        self.state_pub.publish(json.dumps(state_msg))
-
-    def status_callback(self, msg):
-        """处理状态消息"""
-        self.set_state(msg.data)
-       
-    def imu_callback(self, msg):
-        """处理IMU数据"""
-        try:
-            self.imu_yaw = msg.yaw if hasattr(msg, "yaw") else msg.get("yaw", 0.0)
-            if self.imu_yaw > 180:
-                self.imu_yaw -= 360
-            
-        except json.JSONDecodeError as e:
-            rospy.logerr(f"解析IMU数据失败: {e}")
-
-    def send_command(self, motor_id, command_data):
-        frame_id = 0x600 + motor_id
-        msg = can.Message(arbitration_id=frame_id, data=command_data, is_extended_id=False)
-        self.bus.send(msg)
-        time.sleep(0.05)
     
-    def set_position_mode(self, motor_id):#0x03>>0x01
+    def enter_absolute_position_mode(self, motor_id, position):
+        """设置电机进入绝对位置模式并设置目标位置"""
+        # 1. 设置位置模式
+        self.set_position_mode(motor_id)
+        
+        # 2. 设置目标位置
+        self.set_position_pluse(motor_id, position)
+        
+        # 3. 设置为绝对位置立即生效模式并启用
+        self.position_mode_enable(motor_id)
+        
+        rospy.loginfo(f"电机 {motor_id} 已进入绝对位置立即生效模式，目标位置: {position}")
+
+    def set_position_mode(self, motor_id):# 0x03>>0x01 ， 位置模式
         self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00])
         
     def set_position_pluse(self, motor_id, pluse):
@@ -154,6 +135,97 @@ class ServoDriveController:
             (pluse >> 16) & 0xFF,
             (pluse >> 24) & 0xFF
         ]
+        self.send_command(motor_id, data)
+    
+    def position_mode_enable(self, motor_id):
+        '''设置电机工作在绝对位置模式，立即模式'''
+        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x2F, 0x00, 0x00, 0x00])
+        time.sleep(0.1)
+        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x3F, 0x00, 0x00, 0x00])
+        self.position_mode_configured = True  # 标记位置模式已配置
+        rospy.loginfo(f"电机 {motor_id} 绝对位置模式已启用并触发执行")
+        # 11 0x00000601 2B 40 60 00 2F 00 00 00
+        # 控制字 6040 h -00 h 设置为 002F h 设置驱动器工作在绝对位置立即模式，并
+        # 使能。
+        # 13 0x00000601 2B 40 60 00 3F 00 00 00
+        # 控制字 6040 h -00 h 设置为 003F h 设置驱动器工作在绝对位置立即模式，
+        # 6040 h -00 h 的 bit4 上升沿执行位置指令。
+
+    def read_motor_position(self, motor_id):
+        '''发送读取位置指令'''
+        self.send_command(motor_id, [0x40, 0x63, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        # 这里需要监听CAN总线返回的数据，实际项目中应用can库的recv()或回调
+        msg = self.bus.recv(timeout=0.5)
+        if msg and msg.arbitration_id == (0x580 + motor_id):
+            # 解析返回的4字节位置
+            pos = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
+            # 处理有符号数
+            if pos & 0x80000000:
+                pos -= 0x100000000
+            rospy.loginfo(f"电机 {motor_id} 当前位置: {pos}")
+            return pos
+        return None
+
+    def publish_state(self):
+        """发布机器人状态信息，包含速度和状态"""
+        state_msg = {
+            "status": self.current_status,
+            "velocity_up": self.current_velocity_up / rate,  # 单位转换为RPM
+            "velocity_low": self.current_velocity_low / rate,
+            "velocity_brush": self.current_velocity_brush / rate,
+            "imu_yaw": self.imu_yaw,  # IMU偏航角
+            "sensors_status": self.sensors_status,  # 超声波传感器状态
+            "timestamp": time.time()
+        }
+        self.state_pub.publish(json.dumps(state_msg))
+
+    def status_callback(self, msg):
+        """处理状态消息"""
+        self.set_state(msg.data)
+
+    def imu_callback(self, msg):
+        """处理IMU数据"""
+        try:
+            self.imu_yaw = msg.yaw if hasattr(msg, "yaw") else msg.get("yaw", 0.0)
+            # if self.imu_yaw > 180:
+            #     self.imu_yaw -= 360
+            if self.initial_yaw is None:
+                self.initial_yaw = self.imu_yaw
+                print(f"Initial IMU yaw set to: {self.initial_yaw} degrees")
+            
+            # 计算相对角度：将当前yaw值减去初始yaw值
+            if self.initial_yaw is not None:
+                relative_yaw = self.imu_yaw - self.initial_yaw
+
+                # 处理yaw角度范围，确保在-180到180度之间
+                if relative_yaw > 180:
+                    relative_yaw -= 360
+                elif relative_yaw < -180:
+                    relative_yaw += 360
+
+            self.imu_yaw = relative_yaw
+            
+        except json.JSONDecodeError as e:
+            rospy.logerr(f"解析IMU数据失败: {e}")
+
+    def send_command(self, motor_id, command_data):
+        frame_id = 0x600 + motor_id
+        msg = can.Message(arbitration_id=frame_id, data=command_data, is_extended_id=False)
+        self.bus.send(msg)
+        time.sleep(0.05)
+    
+    def set_velocity_mode(self, motor_id):
+        self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x03, 0x00, 0x00, 0x00])
+        
+    def set_target_velocity(self, motor_id, velocity):
+        data = [
+            0x23, 0xFF, 0x60, 0x00,
+            velocity & 0xFF,
+            (velocity >> 8) & 0xFF,
+            (velocity >> 16) & 0xFF,
+            (velocity >> 24) & 0xFF
+        ]
+        # print(f"设置电机 {motor_id} 目标速度: {velocity} RPM")
         self.send_command(motor_id, data)
     
     def set_acceleration(self, motor_id, acceleration):
@@ -177,14 +249,7 @@ class ServoDriveController:
         self.send_command(motor_id, data)
     
     def enable_drive(self, motor_id):
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x2F, 0x00, 0x00, 0x00])
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x3F, 0x00, 0x00, 0x00])
-        # 11 0x00000601 2B 40 60 00 2F 00 00 00
-        # 控制字 6040 h -00 h 设置为 002F h 设置驱动器工作在绝对位置立即模式，并
-        # 使能。
-        # 13 0x00000601 2B 40 60 00 3F 00 00 00
-        # 控制字 6040 h -00 h 设置为 003F h 设置驱动器工作在绝对位置立即模式，
-        # 6040 h -00 h 的 bit4 上升沿执行位置指令。
+        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
     
     def start_motor(self, motor_id):
         if not 1 <= motor_id <= 127:
@@ -192,27 +257,26 @@ class ServoDriveController:
         motor_id_byte = motor_id & 0xFF
         self.send_command(motor_id, [0x01, motor_id_byte])
     
-    def configure_motor(self, motor_id, pluse, acceleration, deceleration):
-        rospy.loginfo(f"配置电机 {motor_id}: 速度={int(pluse)}, 加速度={acceleration}, 减速度={deceleration}")
+    def configure_motor(self, motor_id, velocity, acceleration, deceleration):
+        rospy.loginfo(f"配置电机 {motor_id}: 速度={int(velocity/rate)}, 加速度={acceleration}, 减速度={deceleration}")
         self.start_motor(motor_id)
-        self.set_position_mode(motor_id)
-        self.set_position_pluse(motor_id, pluse)  #输出转换为脉冲/秒
-        self.set_velocoty_pluse(motor_id, pluse)  #输出转换为脉冲/秒
+        self.set_velocity_mode(motor_id)
+        self.set_target_velocity(motor_id, velocity)  #输出转换为脉冲/秒
         self.set_acceleration(motor_id, acceleration)
         self.set_deceleration(motor_id, deceleration)
         self.enable_drive(motor_id)
 
     def shutdown(self):
         rospy.loginfo("正在关闭电机控制器...")
-        self.set_position_pluse(2, 0)
-        self.set_position_pluse(3, 0)
-        self.set_position_pluse(4, 0)
+        self.set_target_velocity(2, 0)
+        self.set_target_velocity(3, 0)
+        self.set_target_velocity(4, 0)
 
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -228,13 +292,14 @@ class ServoDriveController:
         key_mapping = {
             's': "STOP",
             'f': "FORWARD",
-            'b': "BACKWARD"
+            'b': "BACKWARD",
+            'a': "START"  # 位置模式自动运行状态
         }
         if key in key_mapping:
             self.set_state(key_mapping[key])
         else:
             rospy.loginfo(f"无效按键: {key}")
-        
+
     def distance_callback(self, msg):
         """超声波距离检测回调"""
         if msg.distance_a < 30:
@@ -263,6 +328,7 @@ class ServoDriveController:
             if (msg.distance_c < 30 or msg.distance_d < 30):
                 self.set_state("STOP")
 
+
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -289,13 +355,9 @@ class ServoDriveController:
                 rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
                 
-                # self.set_position_pluse(2, left_speed)
-                # self.set_position_pluse(3, right_speed)
-                # self.set_position_pluse(4, brush_speed)
-                #修改为更新位置模式下的速度
-                self.set_velocoty_pluse(2, left_speed)
-                self.set_velocoty_pluse(3, right_speed)
-                self.set_velocoty_pluse(4, brush_speed)
+                self.set_target_velocity(2, left_speed)
+                self.set_target_velocity(3, right_speed)
+                self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -309,13 +371,9 @@ class ServoDriveController:
                 self.last_right_speed != 0 or
                 self.last_brush_speed != 0):
 
-                self.set_position_pluse(2, 0)
-                self.set_position_pluse(3, 0)
-                self.set_position_pluse(4, 0)
-                self.set_velocoty_pluse(2, 0)
-                self.set_velocoty_pluse(3, 0)
-                self.set_velocoty_pluse(4, 0)
-
+                self.set_target_velocity(2, 0)
+                self.set_target_velocity(3, 0)
+                self.set_target_velocity(4, 0)
                 self.last_left_speed = 0
                 self.last_right_speed = 0
                 self.last_brush_speed = 0
@@ -324,6 +382,66 @@ class ServoDriveController:
             self.current_velocity_up = 0
             self.current_velocity_brush = 0
             # self.publish_state()
+        elif self.current_status == "START":
+            # START状态处理 - 绝对位置立即生效模式
+            config = self.status_config["START"]
+            # 读取当前位置
+            left_pos = self.read_motor_position(2)
+            right_pos = self.read_motor_position(3)
+            if left_pos is not None:
+                self.left_position = left_pos
+            if right_pos is not None:
+                self.right_position = right_pos
+             # 判断是否到达目标
+            target_left = self.forward_target if self.position_direction == 1 else self.backward_target
+            target_right = self.backward_target if self.position_direction == 1 else self.forward_target
+
+            # 判断到达目标（允许一定误差）
+            if (abs(self.left_position - target_left) < 1000 and
+                abs(self.right_position - target_right) < 1000):
+                # 反向
+                self.position_direction *= -1
+                # 下发新的目标位置
+                
+                self.set_velocoty_pluse(2, config["velocity_low"]*self.position_direction)
+                self.set_velocoty_pluse(3, config["velocity_up"]*self.position_direction)
+                new_left = self.forward_target if self.position_direction == 1 else self.backward_target
+                new_right = self.backward_target if self.position_direction == 1 else self.forward_target
+                self.enter_absolute_position_mode(2, new_left)
+                self.enter_absolute_position_mode(3, new_right)
+                rospy.loginfo(f"到达目标，切换方向，新的目标: 左{new_left}, 右{new_right}")
+            # # 如果是第一次进入START状态，设置位置模式
+            # if not self.position_mode_configured:
+            #     try:
+            #         rospy.loginfo(">>> 设置电机进入绝对位置模式 <<<")  
+            #         # 配置电机2和3的位置模式
+            #         # if self.load_config and "velocity" in self.load_config.get("motors", [{}])[0]:
+            #         #     position_vel = self.load_config["motors"][0]["velocity"] * rate
+            #         #     rospy.loginfo(f"应用YAML中的位置模式速度设置: {position_vel}")
+            #             # 设置位置移动速度
+            #         self.set_velocoty_pluse(2, config["velocity_low"])
+            #         self.set_velocoty_pluse(3, config["velocity_up"])
+                    
+            #         # 进入绝对位置模式并设置目标位置
+            #         self.enter_absolute_position_mode(2, config["position_left"])
+            #         self.enter_absolute_position_mode(3, config["position_right"])
+                
+            #     except Exception as e:
+            #         rospy.logerr(f"配置位置模式出错: {e}")  
+            # 设置刷子电机速度（保持速度模式）
+            brush_speed = config["velocity_brush"]
+            if self.last_brush_speed != brush_speed:
+                self.set_target_velocity(4, brush_speed)
+                self.last_brush_speed = brush_speed
+                rospy.loginfo(f"刷子速度设置: {brush_speed/rate}")
+            
+            self.position_engaged = True
+            self.current_velocity_brush = brush_speed
+            
+            # 更新状态变量用于发布
+            self.current_velocity_low = 0  # 位置模式无需设定速度
+            self.current_velocity_up = 0
+            # self.publish_state()        
 
 
     @staticmethod
@@ -345,26 +463,26 @@ def main():
     rospy.loginfo("开始自动配置驱动器...")
     for motor in config["motors"]:
         motor_id = motor.get("id")
-        pluse = motor.get("pluse")
+        velocity = motor.get("velocity")
         acceleration = motor.get("acceleration")
         deceleration = motor.get("deceleration")
-        if None in (motor_id, pluse, acceleration, deceleration):
+        if None in (motor_id, velocity, acceleration, deceleration):
             rospy.logwarn(f"跳过无效配置: {motor}")
             continue
         try:
             rospy.loginfo(f"配置电机 {motor_id}...")
             controller.configure_motor(
                 motor_id=motor_id,
-                pluse=int(pluse),
-                acceleration=int(acceleration),
-                deceleration=int(deceleration)
+                velocity=int(velocity*rate),
+                acceleration=int(acceleration*rate),
+                deceleration=int(deceleration*rate)
             )
             controller.current_status = controller.status_list[0]  # 初始化为停止状态
         except Exception as e:
             rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
     rospy.loginfo("电机初始化完成（Ctrl+C 退出）")
     # 订阅速度命令话题
-    rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
+    # rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
     #t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)

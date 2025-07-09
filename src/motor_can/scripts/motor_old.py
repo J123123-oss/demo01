@@ -19,44 +19,26 @@ class ServoDriveController:
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         #设置状态列表
         self.status_list = [
-            "START",  # 启动状态
             "STOP",  # 停止状态
             "FORWARD",  # 前进状态
             "BACKWARD",  # 后退状态
-            "ROLLER_ACCEL",# 滚刷加速状态
-            "ROLLER_DECEL"  # 滚刷减速状态
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
-            "START": {  # 启动状态
-                "velocity_up": 0,
-                "velocity_low": 0,
-                "velocity_brush": 3000 * rate
-            },
             "STOP": {  # 停止状态
                 "velocity_up": 0,
                 "velocity_low": 0,
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": 50 * rate,
-                "velocity_low": 50 * rate,
-                "velocity_brush": 3000 * rate
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
+                "velocity_brush": -1500 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -50 * rate,
-                "velocity_low": -50 * rate,
-                "velocity_brush": -3000 * rate
-            },
-            "ROLLER_ACCEL": {  # 滚刷加速状态
-                "velocity_up": self.last_left_speed,
-                "velocity_low": self.last_right_speed,
-                "velocity_brush": (self.last_brush_speed + 1000 * rate ) if self.last_brush_speed is not None else 0
-            },
-            "ROLLER_DECEL": {  # 滚刷减速状态       
-                "velocity_up": self.last_left_speed,
-                "velocity_low": self.last_right_speed,
-                "velocity_brush": (self.last_brush_speed - 1000 * rate ) if self.last_brush_speed is not None else 0
+                "velocity_up": -250 * rate,
+                "velocity_low": 250 * rate,
+                "velocity_brush": 1500 * rate
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -72,6 +54,7 @@ class ServoDriveController:
 
         self.stop_velocity = 0  # 停止速度
         self.imu_yaw = 0.0  # IMU偏航角 单位度
+        self.initial_yaw = None
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
 
@@ -98,6 +81,35 @@ class ServoDriveController:
         rospy.loginfo(f"状态已更新为: {self.current_status}")
         return True
 
+    # def set_state(self, new_state):
+    #     """设置新状态并应用对应的速度配置"""
+    #     correction = 0.0
+    #     if new_state not in self.status_config:
+    #         rospy.logwarn(f"尝试设置无效状态: {new_state}")
+    #         return False
+
+    #     if new_state == self.current_status:
+    #         return False  # 状态未改变
+    #     self.current_status = new_state
+    #     config = self.status_config[new_state]
+
+    #     # 设置速度
+    #     self.current_velocity_up = config["velocity_up"]
+    #     self.current_velocity_low = config["velocity_low"]
+    #     self.current_velocity_brush = config["velocity_brush"]
+
+    #     if self.imu_yaw and new_state in ["FORWARD", "BACKWARD"]:
+    #         correction = self.pid_correction(self.imu_yaw)
+    #         rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+    #         # 左右轮速度矫正（左轮-修正，右轮+修正，方向可根据实际调整）
+    #     self.set_target_velocity(2, int(self.current_velocity_low - correction))
+    #     self.set_target_velocity(3, int(self.current_velocity_up + correction))
+    #     self.set_target_velocity(4, self.current_velocity_brush)
+    #     # 发布状态
+    #     self.publish_state()
+    #     self.last_state = self.current_status
+    #     rospy.loginfo(f"状态已更新为: {self.current_status}")
+    #     return True
 
     def publish_state(self):
         """发布机器人状态信息，包含速度和状态"""
@@ -115,13 +127,49 @@ class ServoDriveController:
     def status_callback(self, msg):
         """处理状态消息"""
         self.set_state(msg.data)
-       
+        # if msg.data in self.status_list:
+        #     self.current_status = msg.data
+        #     if self.current_status == "STOP":
+        #         self.current_velocity_up = self.stop_velocity
+        #         self.current_velocity_low = self.stop_velocity
+        #         self.current_velocity_brush = self.stop_velocity
+        #         self.publish_state()
+        #     elif self.current_status == "FORWARD":
+        #         self.current_velocity_up = int(50 * rate)
+        #         self.current_velocity_low = int(50 * rate)
+        #         self.current_velocity_brush = int(3000 * rate)
+        #         self.publish_state()
+        #     elif self.current_status == "BACKWARD":
+        #         self.current_velocity_up = int(-50 * rate)
+        #         self.current_velocity_low = int(-50 * rate)
+        #         self.current_velocity_brush = int(-3000 * rate)
+        #         self.publish_state()
+        #     else:
+        #         rospy.logwarn(f"未知状态: {msg.data}")
+        #     rospy.loginfo(f"当前状态更新为: {self.current_status}")
+        # else:
+        #     rospy.logwarn(f"收到未知状态: {msg.data}")
     def imu_callback(self, msg):
         """处理IMU数据"""
         try:
             self.imu_yaw = msg.yaw if hasattr(msg, "yaw") else msg.get("yaw", 0.0)
-            if self.imu_yaw > 180:
-                self.imu_yaw -= 360
+            # if self.imu_yaw > 180:
+            #     self.imu_yaw -= 360
+            if self.initial_yaw is None:
+                self.initial_yaw = self.imu_yaw
+                print(f"Initial IMU yaw set to: {self.initial_yaw} degrees")
+            
+            # 计算相对角度：将当前yaw值减去初始yaw值
+            if self.initial_yaw is not None:
+                relative_yaw = self.imu_yaw - self.initial_yaw
+
+                # 处理yaw角度范围，确保在-180到180度之间
+                if relative_yaw > 180:
+                    relative_yaw -= 360
+                elif relative_yaw < -180:
+                    relative_yaw += 360
+
+            self.imu_yaw = relative_yaw
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
@@ -216,7 +264,21 @@ class ServoDriveController:
             self.set_state(key_mapping[key])
         else:
             rospy.loginfo(f"无效按键: {key}")
-        
+        # if key == 's':
+        #     self.current_status = self.status_list[0]
+        #     self.publish_state()
+        #     rospy.loginfo("切换到停止状态")
+        # elif key == 'f':
+        #     self.current_status = self.status_list[1]
+        #     self.publish_state()
+        #     rospy.loginfo("切换到前进状态")
+        # elif key == 'b':
+        #     self.current_status = self.status_list[2]
+        #     self.publish_state()
+        #     rospy.loginfo("切换到后退状态")
+        # else:
+        #     rospy.loginfo("无效按键: %s" % key)
+
     def distance_callback(self, msg):
         """超声波距离检测回调"""
         if msg.distance_a < 30:
@@ -245,6 +307,42 @@ class ServoDriveController:
             if (msg.distance_c < 30 or msg.distance_d < 30):
                 self.set_state("STOP")
 
+        # # 后退边缘检测
+        # if not self.stop_flag and self.current_status == self.status_list[2]:  # BACKWARD
+        #     if (msg.distance_c < 30 or msg.distance_d < 30):
+        #         self.set_target_velocity(2, 0)
+        #         self.set_target_velocity(3, 0)
+        #         self.last_left_speed = 0
+        #         self.last_right_speed = 0
+        #         # self.current_velocity_brush = 0    #滚刷待定
+        #         self.current_velocity_low = 0
+        #         self.current_velocity_up = 0
+        #         self.publish_state()
+        #         self.stop_flag = True
+        #     else:
+        #         self.stop_flag = False
+
+
+        # if (msg.distance_a < 30 or msg.distance_b < 30) and self.current_status == self.status_list[1]:
+        #     # self.set_state("STOP")
+        #     self.set_target_velocity(2, 0)
+        #     self.set_target_velocity(3, 0)
+        #     rospy.loginfo("正向超声波检测触发，暂停前进状态")
+            # self.set_state("BACKWARD")
+
+        # elif self.current_status == self.status_list[1]:
+        #     self.set_state("FORWARD")
+        #     rospy.loginfo("保持前进状态")
+
+        # if (msg.distance_c < 30 or msg.distance_d < 30) and self.current_status == self.status_list[2]:
+        #     self.set_target_velocity(2, 0)
+        #     self.set_target_velocity(3, 0)
+        #     rospy.loginfo("反向超声波检测触发，暂停后退状态")
+        #     # self.set_state("FORWARD")
+        # else:
+        #     self.set_state("BACKWARD")
+        #     rospy.loginfo("保持前进状态")
+
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -258,7 +356,7 @@ class ServoDriveController:
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
-        if self.current_status in ["FORWARD", "BACKWARD","START"] and -10 < self.imu_yaw < 10:
+        if self.current_status in ["FORWARD", "BACKWARD"] and -15 < self.imu_yaw < 15:
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
@@ -338,7 +436,7 @@ def main():
             rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
     rospy.loginfo("电机初始化完成（Ctrl+C 退出）")
     # 订阅速度命令话题
-    rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
+    # rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
     #t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
