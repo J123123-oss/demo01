@@ -5,7 +5,7 @@
 [ -e /dev/ttyACM1 ] && sudo chmod 777 /dev/ttyACM1
 
 
-sudo slcand -o -c -s8 /dev/ttyACM1 can0
+sudo slcand -o -c -s8 /dev/ttyACM0 can0
 
 
 sudo ifconfig can0 up

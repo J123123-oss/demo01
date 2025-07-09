@@ -54,6 +54,7 @@ class ServoDriveController:
 
         self.stop_velocity = 0  # 停止速度
         self.imu_yaw = 0.0  # IMU偏航角 单位度
+        self.initial_yaw = None
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
 
@@ -152,8 +153,23 @@ class ServoDriveController:
         """处理IMU数据"""
         try:
             self.imu_yaw = msg.yaw if hasattr(msg, "yaw") else msg.get("yaw", 0.0)
-            if self.imu_yaw > 180:
-                self.imu_yaw -= 360
+            # if self.imu_yaw > 180:
+            #     self.imu_yaw -= 360
+            if self.initial_yaw is None:
+                self.initial_yaw = self.imu_yaw
+                print(f"Initial IMU yaw set to: {self.initial_yaw} degrees")
+            
+            # 计算相对角度：将当前yaw值减去初始yaw值
+            if self.initial_yaw is not None:
+                relative_yaw = self.imu_yaw - self.initial_yaw
+
+                # 处理yaw角度范围，确保在-180到180度之间
+                if relative_yaw > 180:
+                    relative_yaw -= 360
+                elif relative_yaw < -180:
+                    relative_yaw += 360
+
+            self.imu_yaw = relative_yaw
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
