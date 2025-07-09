@@ -1,0 +1,23 @@
+[Unit]
+Description=AutoStart Service
+After=syslog.target network.target dev-ttyACM1.device
+Wants=dev-ttyACM1.device
+# 如果你的脚本需要网络，确保它在网络后启动
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+#User=orangepi
+ExecStart=/bin/bash /home/orangepi/demo01/autostart.sh
+# 脚本路径和解释器
+Restart=on-failure
+# 如果脚本崩溃，自动重启
+#User=ubuntu  
+# 服务运行的用户（根据需要调整）
+#WorkingDirectory=/home/ubuntu  
+# 设置工作目录
+#Type=forking
+#RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+# 服务启动时加入默认运行

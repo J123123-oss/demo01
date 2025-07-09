@@ -11,11 +11,11 @@ import sys
 import select
 # import os
 
-rate = 166  # Hz
+rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    def __init__(self, channel='vcan0', interface='socketcan'):
-    # def __init__(self, channel='can0', interface='socketcan'):
+    #def __init__(self, channel='vcan0', interface='socketcan'):
+    def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         #设置状态列表
         self.status_list = [
@@ -33,12 +33,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": 50 * rate,
                 "velocity_low": 50 * rate,
-                "velocity_brush": 1200 * rate
+                "velocity_brush": 3000 * rate
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -50 * rate,
                 "velocity_low": -50 * rate,
-                "velocity_brush": -1200 * rate
+                "velocity_brush": -3000 * rate
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -136,12 +136,12 @@ class ServoDriveController:
         #     elif self.current_status == "FORWARD":
         #         self.current_velocity_up = int(50 * rate)
         #         self.current_velocity_low = int(50 * rate)
-        #         self.current_velocity_brush = int(1200 * rate)
+        #         self.current_velocity_brush = int(3000 * rate)
         #         self.publish_state()
         #     elif self.current_status == "BACKWARD":
         #         self.current_velocity_up = int(-50 * rate)
         #         self.current_velocity_low = int(-50 * rate)
-        #         self.current_velocity_brush = int(-1200 * rate)
+        #         self.current_velocity_brush = int(-3000 * rate)
         #         self.publish_state()
         #     else:
         #         rospy.logwarn(f"未知状态: {msg.data}")
@@ -225,7 +225,7 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
     # def load_config(config_file="src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
@@ -342,8 +342,8 @@ class ServoDriveController:
         # 实时根据当前状态和IMU矫正左右轮速度
         if self.current_status in ["FORWARD", "BACKWARD"] and -15 < self.imu_yaw < 15:
             correction = self.pid_correction(self.imu_yaw)
-            left_speed = int(self.status_config[self.current_status]["velocity_low"] - correction)
-            right_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             # 左右轮速度矫正（左轮-修正，右轮+修正）
@@ -423,13 +423,13 @@ def main():
     rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
-    t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
-    t.start()
+    #t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
+    #t.start()
     try:
     # 每0.5秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.5), controller.execute_state)
         # 每2秒发布一次状态
-        rospy.Timer(rospy.Duration(2.0), lambda event: controller.publish_state())
+        rospy.Timer(rospy.Duration(0.5), lambda event: controller.publish_state())
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")
