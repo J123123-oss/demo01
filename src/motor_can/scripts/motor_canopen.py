@@ -27,8 +27,8 @@ class ServoDriveController:
         # 定义状态及其对应的速度配置
         self.status_config = {
             "START": {  # 位置模式自动运行状态
-                "position_left": 651883,  # 左侧电机目标位置 由300cm转换而来
-                "position_right": -651883,  # 右侧电机目标位置
+                "position_left": 65188,  # 左侧电机目标位置 由300cm转换而来  651883
+                "position_right": -65188,  # 右侧电机目标位置              651883
                 "velocity_up": 250 * rate,
                 "velocity_low": -250 * rate,
                 "velocity_brush": -1500 * rate #后续添加距离到位后反转的判断
@@ -405,6 +405,8 @@ class ServoDriveController:
                 
                 self.set_velocoty_pluse(2, config["velocity_low"]*self.position_direction)
                 self.set_velocoty_pluse(3, config["velocity_up"]*self.position_direction)
+                self.set_velocoty_pluse(4, config["velocity_brush"]*self.position_direction)
+                # self.set_target_velocity(2, config["velocity_low"]*self.position_direction)
                 new_left = self.forward_target if self.position_direction == 1 else self.backward_target
                 new_right = self.backward_target if self.position_direction == 1 else self.forward_target
                 self.enter_absolute_position_mode(2, new_left)
