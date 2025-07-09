@@ -31,14 +31,14 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": 50 * rate,
-                "velocity_low": -50 * rate,
-                "velocity_brush": 3000 * rate
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
+                "velocity_brush": -1500 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -50 * rate,
-                "velocity_low": 50 * rate,
-                "velocity_brush": -3000 * rate
+                "velocity_up": -250 * rate,
+                "velocity_low": 250 * rate,
+                "velocity_brush": 1500 * rate
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -170,7 +170,6 @@ class ServoDriveController:
                     relative_yaw += 360
 
             self.imu_yaw = relative_yaw
-            # self.imu_yaw = 0
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
