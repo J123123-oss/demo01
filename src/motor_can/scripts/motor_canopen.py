@@ -65,8 +65,8 @@ class ServoDriveController:
         self.position_mode_configured = False  # 标记位置模式是否已配置
         self.left_position = 0
         self.right_position = 0
-        self.forward_target = self.status_config["START"]["position_left"]
-        self.backward_target = -self.status_config["START"]["position_left"]
+        # self.forward_target = self.status_config["START"]["position_left"]
+        # self.backward_target = -self.status_config["START"]["position_left"]
         # self.backward_target = self.status_config["START"]["position_right"]
         self.position_direction = 1  # 1: forward, -1: backward
         self.target_sent_flag = False  # 标记目标指令是否已下发
@@ -166,7 +166,7 @@ class ServoDriveController:
         '''发送读取位置指令'''
         self.send_command(motor_id, [0x40, 0x63, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
         # 这里需要监听CAN总线返回的数据，实际项目中应用can库的recv()或回调
-        msg = self.bus.recv(timeout=0.5)
+        msg = self.bus.recv(timeout=0.1)
         if msg and msg.arbitration_id == (0x580 + motor_id):
             # 解析返回的4字节位置
             pos = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
@@ -314,19 +314,19 @@ class ServoDriveController:
 
     def distance_callback(self, msg):
         """超声波距离检测回调"""
-        if msg.distance_a > 200:
+        if msg.distance_a < 200:
             self.sensors_status |= 0x01  # 设置传感器A状态
         else:
             self.sensors_status &= ~0x01
-        if msg.distance_b > 200:
+        if msg.distance_b < 200:
             self.sensors_status |= 0x02
         else:
             self.sensors_status &= ~0x02
-        if msg.distance_c > 200:
+        if msg.distance_c < 200:
             self.sensors_status |= 0x04
         else:
             self.sensors_status &= ~0x04
-        if msg.distance_d > 200:
+        if msg.distance_d < 200:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
@@ -357,10 +357,10 @@ class ServoDriveController:
         if self.need_position_mode_init and self.current_status == "START":
             config = self.status_config["START"]
             # 设置两轮为位置模式
-            self.set_position_mode(2)
-            self.set_position_mode(3)
             self.enter_absolute_position_mode(2, config["position_left"])
             self.enter_absolute_position_mode(3, config["position_right"])
+            self.set_position_mode(2)
+            self.set_position_mode(3)
             self.need_position_mode_init = False
             rospy.loginfo("已重新初始化两轮为位置模式")
         # if self.need_speed_mode_init:
