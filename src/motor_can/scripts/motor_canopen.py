@@ -151,7 +151,7 @@ class ServoDriveController:
     def position_mode_enable(self, motor_id):
         '''设置电机工作在绝对位置模式，立即模式'''
         self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
-        time.sleep(0.1)
+        # time.sleep(0.1)
         self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x3F, 0x00, 0x00, 0x00])
         self.position_mode_configured = True  # 标记位置模式已配置
         rospy.loginfo(f"电机 {motor_id} 绝对位置模式已启用并触发执行")
@@ -166,7 +166,7 @@ class ServoDriveController:
         '''发送读取位置指令'''
         self.send_command(motor_id, [0x40, 0x63, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
         # 这里需要监听CAN总线返回的数据，实际项目中应用can库的recv()或回调
-        msg = self.bus.recv(timeout=0.1)
+        msg = self.bus.recv(timeout=0.05)
         if msg and msg.arbitration_id == (0x580 + motor_id):
             # 解析返回的4字节位置
             pos = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
@@ -557,7 +557,7 @@ def main():
     #t.start()
     try:
     # 每0.5秒执行一次状态执行器
-        rospy.Timer(rospy.Duration(0.5), controller.execute_state)
+        rospy.Timer(rospy.Duration(0.2), controller.execute_state)
         # 每2秒发布一次状态
         rospy.Timer(rospy.Duration(0.5), lambda event: controller.publish_state())
         rospy.spin()
