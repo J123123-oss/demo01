@@ -10,6 +10,6 @@
     <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen">
         <!-- <param name="port" value="/dev/SENSOR0"/> -->
         <!-- <param name="baudrate" value="115200"/> -->
-    <!-- </node>     -->
-    <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen"/>
+    </node>    
+    <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen" />
 </launch>

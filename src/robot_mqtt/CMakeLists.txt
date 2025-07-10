@@ -161,7 +161,7 @@ include_directories(
 
 # 安装Python脚本
 catkin_install_python(PROGRAMS
-  scripts/mqtt_test2.py
+  scripts/mqtt_test.py
   # scripts/mqtt_0526_mod.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
