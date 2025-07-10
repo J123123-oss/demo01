@@ -166,7 +166,7 @@ class ServoDriveController:
         '''发送读取位置指令'''
         self.send_command(motor_id, [0x40, 0x63, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
         # 这里需要监听CAN总线返回的数据，实际项目中应用can库的recv()或回调
-        msg = self.bus.recv(timeout=0.05)
+        msg = self.bus.recv(timeout=0.5)
         if msg and msg.arbitration_id == (0x580 + motor_id):
             # 解析返回的4字节位置
             pos = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
