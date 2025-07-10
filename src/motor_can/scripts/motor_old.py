@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import can
 import time
 import yaml
@@ -281,30 +283,30 @@ class ServoDriveController:
 
     def distance_callback(self, msg):
         """超声波距离检测回调"""
-        if msg.distance_a < 30:
+        if msg.distance_a > 200:
             self.sensors_status |= 0x01  # 设置传感器A状态
         else:
             self.sensors_status &= ~0x01
-        if msg.distance_b < 30:
+        if msg.distance_b > 200:
             self.sensors_status |= 0x02
         else:
             self.sensors_status &= ~0x02
-        if msg.distance_c < 30:
+        if msg.distance_c > 200:
             self.sensors_status |= 0x04
         else:
             self.sensors_status &= ~0x04
-        if msg.distance_d < 30:
+        if msg.distance_d > 200:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
         # 前进边缘检测
         # if not self.stop_flag and self.current_status == self.status_list[1]:  # FORWARD
         if self.current_status == self.status_list[1]:  # FORWARD
-            if (msg.distance_a < 30 or msg.distance_b < 30):
+            if (msg.distance_a > 200):
                 self.set_state("STOP")
 
         if self.current_status == self.status_list[2]:  # BACKWARD
-            if (msg.distance_c < 30 or msg.distance_d < 30):
+            if (msg.distance_b > 200):
                 self.set_state("STOP")
 
         # # 后退边缘检测
@@ -436,7 +438,7 @@ def main():
             rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
     rospy.loginfo("电机初始化完成（Ctrl+C 退出）")
     # 订阅速度命令话题
-    # rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
+    rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
     #t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)

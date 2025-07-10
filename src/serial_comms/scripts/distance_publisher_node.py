@@ -14,7 +14,7 @@ def main():
 
     # Get parameters from the ROS parameter server
     # These can be set in a launch file or via the command line
-    port = rospy.get_param('~port', '/dev/ttyACM3')
+    port = rospy.get_param('~port', '/dev/SENSOR0')
     baudrate = rospy.get_param('~baudrate', 115200) # Common baudrate, adjust if needed
 
     # Create a publisher for the custom Distances message
