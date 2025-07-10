@@ -29,11 +29,11 @@ class ServoDriveController:
         # 定义状态及其对应的速度配置
         self.status_config = {
             "START": {  # 位置模式自动运行状态
-                "position_left": 4096,  # 左侧电机目标位置 由300cm转换而来  651883
-                "position_right": -4096,  # 右侧电机目标位置              651883
+                "position_left": 65188,  # 左侧电机目标位置 由300cm转换而来  651883
+                "position_right": -65188,  # 右侧电机目标位置              651883
                 "velocity_up": 250 * rate,
                 "velocity_low": 250 * rate, #自动速度无法设置负值，二者速度相同
-                "velocity_brush": -1500 * rate #后续添加距离到位后反转的判断
+                "velocity_brush": -100 * rate #后续添加距离到位后反转的判断
             },
 
             "STOP": {  # 停止状态
