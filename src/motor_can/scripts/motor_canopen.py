@@ -42,14 +42,15 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": 250 * rate,
-                "velocity_low": -250 * rate,
-                "velocity_brush": -1500 * rate
+                #下发100到电机减速20：1，实际为5RPM ，发250最终12.5RPM，速度0.078m/s
+                "velocity_up": 637 * rate,   #实际速度0.2m/s
+                "velocity_low": -637 * rate,
+                "velocity_brush": 0 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -250 * rate,
-                "velocity_low": 250 * rate,
-                "velocity_brush": 1500 * rate
+                "velocity_up": -637 * rate,
+                "velocity_low": 637 * rate,
+                "velocity_brush": 1500 * rate   #滚刷速比8
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -80,9 +81,9 @@ class ServoDriveController:
         self.sensors_status = 0 #表示4个超声波传感器触发状态
 
         # PID参数
-        self.pid_kp = 20.0
-        self.pid_ki = 0.0
-        self.pid_kd = 0.2
+        self.pid_kp = 50.0
+        self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
+        self.pid_kd = 0.5  # 如果系统有震荡，可以调整微分增益来抑制震荡
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
@@ -349,9 +350,13 @@ class ServoDriveController:
         error = self.target_yaw - current_yaw
         self.pid_integral += error
         derivative = error - self.pid_last_error
-        correction = (self.pid_kp * error +
-                      self.pid_ki * self.pid_integral +
-                      self.pid_kd * derivative)
+        if abs(error) > 0.3:  # 如果误差小于0.3度，则不进行修正
+            correction = (self.pid_kp * error +
+                        self.pid_ki * self.pid_integral +
+                        self.pid_kd * derivative) * 10  # 放大修正量
+        else:
+            correction = 0  # 在小范围内不进行调整
+
         self.pid_last_error = error
         return correction
     
