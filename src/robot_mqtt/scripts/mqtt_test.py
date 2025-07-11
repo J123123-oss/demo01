@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import paho.mqtt.client as mqtt
 import time
 import rospy
@@ -109,8 +111,7 @@ class MQTTClient:
         self.client.loop_start()
         try:
             print("🚀 运行中 (CTRL+C 退出)...")
-            while True:
-                time.sleep(1)
+            rospy.spin()  # 用spin替换死循环
         except KeyboardInterrupt:
             self.stop()
 

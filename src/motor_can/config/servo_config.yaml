@@ -4,14 +4,14 @@ motors:
   - id: 2      # 靠近工控机电机ID(1-127)
     velocity: 0  # 目标速度(RPM)
     acceleration: 200 # 加速度 (脉冲/s²)
-    deceleration: 200 # 减速度 (脉冲/s²)
+    deceleration: 1500 # 减速度 (脉冲/s²)
 
   - id: 3      # 远离工控机电机ID
     velocity: 0  # 目标速度
     acceleration: 200 # 加速度
-    deceleration: 200 # 减速度
+    deceleration: 1500 # 减速度
   
   - id: 4      # 滚刷电机ID
     velocity: 0  # 目标速度  1600 RPM
     acceleration: 500 # 加速度
-    deceleration: 500 # 减速度
+    deceleration: 1500 # 减速度
