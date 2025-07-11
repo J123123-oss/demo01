@@ -26,7 +26,8 @@ class ServoDriveController:
             "BACKWARD",  # 后退状态
             "START",  # 位置模式自动运行状态
             "ROLLER_ACCEL",# 滚刷加速状态
-            "ROLLER_DECEL"  # 滚刷减速状态
+            "ROLLER_DECEL",  # 滚刷减速状态
+            "DEBUG"  # 调试状态
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
@@ -62,6 +63,16 @@ class ServoDriveController:
                 "velocity_up": self.last_left_speed,
                 "velocity_low": self.last_right_speed,
                 "velocity_brush": (self.last_brush_speed - 1000 * rate ) if self.last_brush_speed is not None else 0  # 滚刷减速到-1000 RPM
+            },
+            "DEBUG": {  # 调试状态
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
+                "velocity_brush": 0,
+                "edge_detection_threshold": 200,  # 边缘检测阈值(cm)
+                "alignment_threshold": 3,         # 对齐误差阈值(cm)
+                "alignment_speed": 50 * rate,     # 对齐速度
+                "alignment_distance": 1000 * rate, # 对齐移动距离
+                "timeout": 20.0                   # 最大校准时间(秒)
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -90,11 +101,22 @@ class ServoDriveController:
         self.initial_yaw = None
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
+        
+        # DEBUG状态专用变量
+        self.distance_a = 0.0  # 超声波传感器A距离
+        self.distance_c = 0.0  # 超声波传感器B距离
+        self.debug_phase = "APPROACH_EDGE"
+        self.debug_phase_start_time = rospy.Time.now()
+        self.active_side = None
+        self.edge_detected = False
+        self.alignment_error = 0.0
+        self.fine_tune_iterations = 0
+        self.calibration_timeout = False
 
         # PID参数
-        self.pid_kp = 20.0
-        self.pid_ki = 0.0
-        self.pid_kd = 0.2
+        self.pid_kp = 50.0
+        self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
+        self.pid_kd = 0.5  # 如果系统有震荡，可以调整微分增益来抑制震荡
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
@@ -109,8 +131,21 @@ class ServoDriveController:
             return False
         if new_state == self.current_status:
             return False  # 状态未改变
+        
+        # DEBUG状态特殊处理
+        if new_state == "DEBUG":
+            rospy.loginfo(">>>>>>>>>> 进入DEBUG边缘校准模式 <<<<<<<<<<")
+            # 重置DEBUG状态变量
+            self.debug_phase = "APPROACH_EDGE"
+            self.debug_phase_start_time = rospy.Time.now()
+            self.active_side = None
+            self.edge_detected = False
+            self.alignment_error = 0.0
+            self.fine_tune_iterations = 0
+            self.calibration_timeout = False      
+        
         # 检查是否从START切换到其他模式
-        if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP", "ROLLER_ACCEL", "ROLLER_DECEL"]:
+        if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP", "DEBUG", "ROLLER_ACCEL", "ROLLER_DECEL"]:
             self.need_speed_mode_init = True
 
          # 状态改变时重置位置模式标志
@@ -198,7 +233,12 @@ class ServoDriveController:
             "velocity_brush": self.current_velocity_brush / rate,
             "imu_yaw": self.imu_yaw,  # IMU偏航角
             "sensors_status": self.sensors_status,  # 超声波传感器状态
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            #后续发布到/debug
+            "debug_phase": self.debug_phase,                 # DEBUG状态
+            "active_side": self.active_side,                 # 当前出界的侧边
+            "alignment_error": self.alignment_error,         # 对齐误差
+            "fine_tune_iterations": self.fine_tune_iterations # 微调迭代次数
         }
         self.state_pub.publish(json.dumps(state_msg))
 
@@ -355,6 +395,26 @@ class ServoDriveController:
                 self.set_state("STOP")
                 time.sleep(1)
                 self.set_state("FORWARD")
+                # 如果当前是DEBUG状态，则进行边缘检测
+        
+        # DEBUG状态下的实时信号处理
+        if self.current_status == "DEBUG":
+            config = self.status_config["DEBUG"]
+            edge_threshold = config["edge_detection_threshold"]
+            self.distance_a = msg.distance_a
+            self.distance_c = msg.distance_c
+
+            
+            # 检测哪个传感器先出界
+            if self.debug_phase == "APPROACH_EDGE" and not self.edge_detected:
+                if self.distance_c >= edge_threshold:
+                    self.active_side = "LEFT"
+                    self.edge_detected = True
+                    rospy.loginfo(f"左侧出界检测! 距离C: {self.distance_c:.1f}mm")
+                elif self.distance_a >= edge_threshold:
+                    self.active_side = "RIGHT"
+                    self.edge_detected = True
+                    rospy.loginfo(f"右侧出界检测! 距离B: {self.distance_a:.1f}mm")
 
 
     def pid_correction(self, current_yaw):
@@ -362,9 +422,13 @@ class ServoDriveController:
         error = self.target_yaw - current_yaw
         self.pid_integral += error
         derivative = error - self.pid_last_error
-        correction = (self.pid_kp * error +
-                      self.pid_ki * self.pid_integral +
-                      self.pid_kd * derivative)
+        if abs(error) > 0.3:  # 如果误差小于0.3度，则不进行修正
+            correction = (self.pid_kp * error +
+                        self.pid_ki * self.pid_integral +
+                        self.pid_kd * derivative) * 10  # 放大修正量
+        else:
+            correction = 0  # 在小范围内不进行调整
+
         self.pid_last_error = error
         return correction
     
@@ -487,45 +551,172 @@ class ServoDriveController:
             if self.last_brush_speed != brush_speed:
                 self.set_target_velocity(4, brush_speed)
                 self.last_brush_speed = brush_speed
-
-            # # 设置移动速度（只需每次切换目标时设置一次即可）
-            # self.set_velocoty_pluse(2, config["velocity_low"])
-            # self.set_velocoty_pluse(3, config["velocity_up"])
-
-            # # 判断是否到达目标（允许一定误差）
-            # if (abs(self.left_position - target_left) < 1000 and
-            #     abs(self.right_position - target_right) < 1000):
-            #     # 切换目标
-            #     self.position_target_flag = not self.position_target_flag
-            #     # 下发新的目标位置
-            #     if self.position_target_flag:
-            #         new_left = config["position_left"]
-            #         new_right = config["position_right"]
-            #     else:
-            #         new_left = 0
-            #         new_right = 0
-            #     self.enter_absolute_position_mode(2, new_left)
-            #     self.enter_absolute_position_mode(3, new_right)
-            #     rospy.loginfo(f"到达目标，切换方向，新的目标: 左{new_left}, 右{new_right}")
-
-            # # 如果刚进入START状态或刚切换目标，需要立即下发目标
-            # if not hasattr(self, "last_target_left") or self.last_target_left != target_left or self.last_target_right != target_right:
-            #     self.enter_absolute_position_mode(2, target_left)
-            #     self.enter_absolute_position_mode(3, target_right)
-            #     self.last_target_left = target_left
-            #     self.last_target_right = target_right
-
-            # # 设置刷子电机速度（保持速度模式）
-            # brush_speed = config["velocity_brush"]
-            # if self.last_brush_speed != brush_speed:
-            #     self.set_target_velocity(4, brush_speed)
-            #     self.last_brush_speed = brush_speed
-            #     rospy.loginfo(f"刷子速度设置: {brush_speed/rate}")
-
-            # self.position_engaged = True
-            # self.current_velocity_brush = brush_speed
-            # self.current_velocity_low = 0
-            # self.current_velocity_up = 0
+        elif self.current_status == "DEBUG":
+            # 处理DEBUG状态
+            if self.current_status == "DEBUG":
+                self.handle_debug_state()
+   
+    def handle_debug_state(self):
+        """处理DEBUG状态下的出界检测和对齐操作"""
+        config = self.status_config["DEBUG"]
+        max_timeout = config["timeout"]
+        elapsed = (rospy.Time.now() - self.debug_phase_start_time).to_sec()
+        
+        # 超时处理
+        if elapsed > max_timeout and not self.debug_phase == "COMPLETE":
+            rospy.logwarn("DEBUG校准超时，即将切换到STOP状态")
+            self.debug_phase = "FAILED"
+            self.calibration_timeout = True
+        
+        # 状态机处理
+        if self.debug_phase == "APPROACH_EDGE":
+            self.handle_approach_edge(config)
+            
+        elif self.debug_phase == "ROTATE_TO_EDGE":
+            self.handle_rotate_to_edge(config)
+            
+        elif self.debug_phase == "FINE_TUNE":
+            self.handle_fine_tune(config)
+            
+        elif self.debug_phase == "COMPLETE":
+            self.handle_complete()
+            
+        elif self.debug_phase == "FAILED":
+            rospy.logerr("DEBUG校准失败，切换到STOP状态")
+            self.set_state("STOP")
+    
+    def handle_approach_edge(self, config):
+        """慢速接近边缘直到一侧出界"""
+        # 设置慢速前进
+        if self.last_left_speed != config["approach_speed"] or self.last_right_speed != -config["approach_speed"]:
+            self.set_target_velocity(2, config["approach_speed"])
+            self.set_target_velocity(3, -config["approach_speed"])
+            self.last_left_speed = config["approach_speed"]
+            self.last_right_speed = -config["approach_speed"]
+            rospy.loginfo("正在慢速接近边缘...")
+        
+        # 检测到一侧出界
+        if self.edge_detected:
+            rospy.loginfo(f"检测到{self.active_side}侧出界，即将开始旋转")
+            self.debug_phase = "ROTATE_TO_EDGE"
+            # 停止移动
+            self.set_target_velocity(2, 0)
+            self.set_target_velocity(3, 0)
+            self.last_left_speed = 0
+            self.last_right_speed = 0
+            rospy.sleep(0.5)  # 短暂停顿
+    
+    def handle_rotate_to_edge(self, config):
+        """旋转机器人使其与边缘平行"""
+        rotation_speed = config["rotation_speed"]
+        rotation_direction = -1 if self.active_side == "LEFT" else 1
+        
+        # 根据出界侧确定旋转方向
+        left_speed = rotation_speed * rotation_direction
+        right_speed = rotation_speed * (-rotation_direction)
+        
+        # 设置旋转速度
+        if self.last_left_speed != left_speed or self.last_right_speed != right_speed:
+            self.set_target_velocity(2, left_speed)
+            self.set_target_velocity(3, right_speed)
+            self.last_left_speed = left_speed
+            self.last_right_speed = right_speed
+            rospy.loginfo(f"旋转校正: {self.active_side}侧出界, 旋转方向: {rotation_direction}")
+        
+        # 旋转检测
+        rospy.sleep(0.7)  # 固定时间旋转 (根据实际情况调整)
+        
+        # 检查旋转后状态
+        self.update_alignment_error()
+        
+        # 停止旋转并进入微调阶段
+        self.set_target_velocity(2, 0)
+        self.set_target_velocity(3, 0)
+        self.last_left_speed = 0
+        self.last_right_speed = 0
+        rospy.loginfo(f"初步旋转完成, 误差: {self.alignment_error:.1f}cm")
+        self.debug_phase = "FINE_TUNE"
+        rospy.sleep(0.5)  # 短暂停顿让读数稳定
+    
+    def handle_fine_tune(self, config):
+        """精细调整位置"""
+        self.fine_tune_iterations += 1
+        self.update_alignment_error()
+        
+        # 检查是否达到误差阈值
+        threshold = config["alignment_threshold"]
+        if abs(self.alignment_error) < threshold or self.fine_tune_iterations > 5:
+            rospy.loginfo(f"微调完成! 误差: {self.alignment_error:.1f}cm (迭代次数: {self.fine_tune_iterations})")
+            self.debug_phase = "COMPLETE"
+            return
+        
+        rospy.loginfo(f"微调迭代 {self.fine_tune_iterations}: 误差: {self.alignment_error:.1f}cm")
+        
+        # 确定调整方向
+        fine_tune_speed = config["fine_tune_speed"]
+        rotation_direction = 1 if self.alignment_error > 0 else -1
+        duration = min(0.1 + abs(self.alignment_error) / 100.0, 1.0)  # 根据误差调整旋转时间
+        
+        left_speed = fine_tune_speed * rotation_direction
+        right_speed = -fine_tune_speed * rotation_direction
+        
+        # 执行微调移动
+        self.set_target_velocity(2, left_speed)
+        self.set_target_velocity(3, right_speed)
+        rospy.sleep(duration)
+        
+        # 停止移动
+        self.set_target_velocity(2, 0)
+        self.set_target_velocity(3, 0)
+        rospy.sleep(0.5)  # 等待读数稳定
+    
+    def handle_complete(self):
+        """校准完成处理"""
+        if self.last_left_speed != 0 or self.last_right_speed != 0:
+            self.set_target_velocity(2, 0)
+            self.set_target_velocity(3, 0)
+            self.last_left_speed = 0
+            self.last_right_speed = 0
+            
+        # 发布校准完成消息
+        self.publish_alignment_complete()
+        
+        # 短暂延时后恢复STOP状态
+        rospy.sleep(2.0)
+        self.set_state("STOP")
+    
+    def update_alignment_error(self):
+        """更新对齐误差值"""
+        # 同时检查新出现的另一侧出界情况
+        threshold = self.status_config["DEBUG"]["edge_detection_threshold"]
+        
+        # 如果另一侧也出界了，计算两侧距离差
+        if (self.distance_a >= threshold and self.distance_b >= threshold):
+            self.alignment_error = abs(self.distance_a - self.distance_b)
+            rospy.loginfo(f"两侧均出界, 距离差: A={self.distance_a:.1f}, B={self.distance_b:.1f}, 误差={self.alignment_error:.1f}cm")
+            #添加前进至边缘代码
+            
+        else:
+            # 只有一侧出界时，使用高度差作为误差估计
+            # 初始出界时这一侧的距离值会骤增
+            if self.active_side == "LEFT":
+                self.alignment_error = abs(self.distance_a - self.distance_c)
+            else:
+                self.alignment_error = abs(self.distance_c - self.distance_a)
+            rospy.loginfo(f"单侧出界, A={self.distance_a:.1f}, C={self.distance_c:.1f}, 估计误差={self.alignment_error:.1f}cm")
+    
+    def publish_alignment_complete(self):
+        """发布校准完成消息"""
+        alignment_msg = {
+            "status": "ALIGNMENT_COMPLETE",
+            "active_side": self.active_side,
+            "alignment_error": self.alignment_error,
+            "iterations": self.fine_tune_iterations,
+            "timestamp": time.time(),
+            "message": f"边缘校准完成 - {self.active_side}侧出界检测, 最终误差: {self.alignment_error:.1f}cm"
+        }
+        self.state_pub.publish(json.dumps(alignment_msg))
+        rospy.loginfo(">>>>>> 边缘校准和超声波矫正完成 <<<<<<")
 
 
     @staticmethod
