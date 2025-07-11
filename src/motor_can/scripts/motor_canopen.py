@@ -25,6 +25,8 @@ class ServoDriveController:
             "FORWARD",  # 前进状态
             "BACKWARD",  # 后退状态
             "START",  # 位置模式自动运行状态
+            "ROLLER_ACCEL",# 滚刷加速状态
+            "ROLLER_DECEL"  # 滚刷减速状态
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
@@ -50,6 +52,16 @@ class ServoDriveController:
                 "velocity_up": -250 * rate,
                 "velocity_low": 250 * rate,
                 "velocity_brush": 1500 * rate
+            },
+            "ROLLER_ACCEL": {  # 滚刷加速状态
+                "velocity_up": self.last_left_speed,
+                "velocity_low": self.last_right_speed,
+                "velocity_brush": (self.last_brush_speed + 1000 * rate ) if self.last_brush_speed is not None else 0  # 滚刷加速到1000 RPM
+            },
+            "ROLLER_DECEL": {  # 滚刷减速状态
+                "velocity_up": self.last_left_speed,
+                "velocity_low": self.last_right_speed,
+                "velocity_brush": (self.last_brush_speed - 1000 * rate ) if self.last_brush_speed is not None else 0  # 滚刷减速到-1000 RPM
             }
         }
         self.last_state = None  # 记录上一次的状态
@@ -98,7 +110,7 @@ class ServoDriveController:
         if new_state == self.current_status:
             return False  # 状态未改变
         # 检查是否从START切换到其他模式
-        if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
+        if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP", "ROLLER_ACCEL", "ROLLER_DECEL"]:
             self.need_speed_mode_init = True
 
          # 状态改变时重置位置模式标志
@@ -364,7 +376,7 @@ class ServoDriveController:
             self.need_position_mode_init = False
             rospy.loginfo("已重新初始化两轮为位置模式")
         # if self.need_speed_mode_init:
-        if self.need_speed_mode_init and self.current_status in ["FORWARD", "BACKWARD", "STOP"]:
+        if self.need_speed_mode_init and self.current_status in ["FORWARD", "BACKWARD", "STOP", "ROLLER_ACCEL", "ROLLER_DECEL"]:
 
             rospy.loginfo("从START切换到速度模式，重新初始化电机...")
             config = self.load_config()       
@@ -389,7 +401,7 @@ class ServoDriveController:
             self.need_speed_mode_init = False
             rospy.loginfo("速度模式初始化完成")
 
-        if self.current_status in ["FORWARD", "BACKWARD"] and -15 < self.imu_yaw < 15:
+        if self.current_status in ["FORWARD", "BACKWARD", "ROLLER_ACCEL", "ROLLER_ACCEL"] and -15 < self.imu_yaw < 15:
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
