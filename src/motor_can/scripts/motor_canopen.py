@@ -166,14 +166,14 @@ class ServoDriveController:
         '''发送读取位置指令'''
         self.send_command(motor_id, [0x40, 0x63, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
         # 这里需要监听CAN总线返回的数据，实际项目中应用can库的recv()或回调
-        msg = self.bus.recv(timeout=0.05)
+        msg = self.bus.recv(timeout=0.5)
         if msg and msg.arbitration_id == (0x580 + motor_id):
             # 解析返回的4字节位置
             pos = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
             # 处理有符号数
             if pos & 0x80000000:
                 pos -= 0x100000000
-            rospy.loginfo(f"电机 {motor_id} 当前位置: {pos}")
+            #rospy.loginfo(f"电机 {motor_id} 当前位置: {pos}")
             return pos
         return None
 
@@ -335,11 +335,14 @@ class ServoDriveController:
         if self.current_status == self.status_list[1]:  # FORWARD
             if (msg.distance_a > 200):
                 self.set_state("STOP")
+                time.sleep(1)
+                self.set_state("BACKWARD")
 
         if self.current_status == self.status_list[2]:  # BACKWARD
             if (msg.distance_b > 200):
                 self.set_state("STOP")
-
+                time.sleep(1)
+                self.set_state("FORWARD")
 
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
