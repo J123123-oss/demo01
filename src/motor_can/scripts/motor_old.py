@@ -304,10 +304,14 @@ class ServoDriveController:
         if self.current_status == self.status_list[1]:  # FORWARD
             if (msg.distance_a > 200):
                 self.set_state("STOP")
+                time.sleep(1)
+                self.set_state("BACKWARD")
 
         if self.current_status == self.status_list[2]:  # BACKWARD
             if (msg.distance_b > 200):
                 self.set_state("STOP")
+                time.sleep(1)
+                self.set_state("FORWARD")
 
         # # 后退边缘检测
         # if not self.stop_flag and self.current_status == self.status_list[2]:  # BACKWARD
