@@ -19,6 +19,9 @@ class ServoDriveController:
     # def __init__(self, channel='vcan0', interface='socketcan'):
     def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
+        self.last_left_speed = 0
+        self.last_right_speed = 0
+        self.last_brush_speed = 0
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态
@@ -36,7 +39,8 @@ class ServoDriveController:
                 "position_right": -65188,  # 右侧电机目标位置              651883
                 "velocity_up": 250 * rate,
                 "velocity_low": 250 * rate, #自动速度无法设置负值，二者速度相同
-                "velocity_brush": -100 * rate #后续添加距离到位后反转的判断
+                "velocity_brush": -100 * rate, #后续添加距离到位后反转的判断
+
             },
 
             "STOP": {  # 停止状态
@@ -68,10 +72,16 @@ class ServoDriveController:
                 "velocity_up": 250 * rate,
                 "velocity_low": -250 * rate,
                 "velocity_brush": 0,
-                "edge_detection_threshold": 200,  # 边缘检测阈值(cm)
+                # "edge_detection_threshold": 200,  # 边缘检测阈值(cm)
+                # "alignment_threshold": 3,         # 对齐误差阈值(cm)
+                # "alignment_speed": 50 * rate,     # 对齐速度
+                # "alignment_distance": 1000 * rate, # 对齐移动距离
+                # "timeout": 20.0,                # 最大校准时间(秒)
+                "edge_detection_threshold": 200,  # 出界检测阈值(cm)
                 "alignment_threshold": 3,         # 对齐误差阈值(cm)
-                "alignment_speed": 50 * rate,     # 对齐速度
-                "alignment_distance": 1000 * rate, # 对齐移动距离
+                "approach_speed": 200 * rate,      # 接近速度
+                "rotation_speed": 100 * rate,       # 旋转速度
+                "fine_tune_speed": 50 * rate,      # 微调速度
                 "timeout": 20.0                   # 最大校准时间(秒)
             }
         }
@@ -80,9 +90,7 @@ class ServoDriveController:
         self.current_velocity_up = 0   # ID = 3
         self.current_velocity_low = 0  # ID = 2
         self.current_velocity_brush = 0  # ID = 4
-        self.last_left_speed = None
-        self.last_right_speed = None
-        self.last_brush_speed = None
+
         self.stop_flag = False   
         self.position_engaged = False           # 标记位置模式是否已激活
         self.position_mode_configured = False  # 标记位置模式是否已配置
@@ -357,12 +365,24 @@ class ServoDriveController:
             's': "STOP",
             'f': "FORWARD",
             'b': "BACKWARD",
-            'a': "START"  # 位置模式自动运行状态
+            'a': "START",  # 位置模式自动运行状态
+            'd': "DEBUG"
         }
         if key in key_mapping:
             self.set_state(key_mapping[key])
+            # self.debug_phase(key_mapping[key])
         else:
             rospy.loginfo(f"无效按键: {key}")
+        # DEBUG
+        key_mapping_debug = {
+            '1': "ROTATE_TO_EDGE",
+            '2': "FINE_TUNE",
+            '3': "COMPLETE",
+        }       
+        if key in key_mapping_debug:
+            self.debug_phase = key_mapping_debug[key]
+        else:
+            rospy.loginfo(f"DEBUG无效按键: {key}")
 
     def distance_callback(self, msg):
         """超声波距离检测回调"""
@@ -434,15 +454,15 @@ class ServoDriveController:
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
-        if self.need_position_mode_init and self.current_status == "START":
-            config = self.status_config["START"]
-            # 设置两轮为位置模式
-            self.enter_absolute_position_mode(2, config["position_left"])
-            self.enter_absolute_position_mode(3, config["position_right"])
-            self.set_position_mode(2)
-            self.set_position_mode(3)
-            self.need_position_mode_init = False
-            rospy.loginfo("已重新初始化两轮为位置模式")
+        # if self.need_position_mode_init and self.current_status == "START":
+        #     config = self.status_config["START"]
+        #     # 设置两轮为位置模式
+        #     self.enter_absolute_position_mode(2, config["position_left"])
+        #     self.enter_absolute_position_mode(3, config["position_right"])
+        #     self.set_position_mode(2)
+        #     self.set_position_mode(3)
+        #     self.need_position_mode_init = False
+        #     rospy.loginfo("已重新初始化两轮为位置模式")
         # if self.need_speed_mode_init:
         if self.need_speed_mode_init and self.current_status in ["FORWARD", "BACKWARD", "STOP", "ROLLER_ACCEL", "ROLLER_DECEL"]:
 
@@ -509,48 +529,48 @@ class ServoDriveController:
             self.current_velocity_up = 0
             self.current_velocity_brush = 0
             # self.publish_state()
-        elif self.current_status == "START":
-            config = self.status_config["START"]
-            # 读取当前位置
-            left_pos = self.read_motor_position(2)
-            right_pos = self.read_motor_position(3)
-            if left_pos is not None:
-                self.left_position = left_pos
-            if right_pos is not None:
-                self.right_position = right_pos
+        # elif self.current_status == "START":
+        #     config = self.status_config["START"]
+        #     # 读取当前位置
+        #     left_pos = self.read_motor_position(2)
+        #     right_pos = self.read_motor_position(3)
+        #     if left_pos is not None:
+        #         self.left_position = left_pos
+        #     if right_pos is not None:
+        #         self.right_position = right_pos
 
-            # 状态机：目标在4096/-4096 <-> 0之间切换
-            # 用self.position_target_flag标记当前目标（True: 4096/-4096, False: 0）
-            if not hasattr(self, "position_target_flag"):
-                self.position_target_flag = True  # 初始目标为4096/-4096
+        #     # 状态机：目标在4096/-4096 <-> 0之间切换
+        #     # 用self.position_target_flag标记当前目标（True: 4096/-4096, False: 0）
+        #     if not hasattr(self, "position_target_flag"):
+        #         self.position_target_flag = True  # 初始目标为4096/-4096
 
-            if self.position_target_flag:
-                target_left = config["position_left"]
-                target_right = config["position_right"]
-            else:
-                target_left = 0
-                target_right = 0
-        # 只在切换目标时下发一次目标指令
-            if not self.target_sent_flag:
-                self.set_velocoty_pluse(2, config["velocity_low"])
-                self.set_velocoty_pluse(3, config["velocity_up"])
-                self.enter_absolute_position_mode(2, target_left)
-                self.enter_absolute_position_mode(3, target_right)
-                self.target_sent_flag = True
-                rospy.loginfo(f"下发目标: 左{target_left}, 右{target_right}")
+        #     if self.position_target_flag:
+        #         target_left = config["position_left"]
+        #         target_right = config["position_right"]
+        #     else:
+        #         target_left = 0
+        #         target_right = 0
+        # # 只在切换目标时下发一次目标指令
+        #     if not self.target_sent_flag:
+        #         self.set_velocoty_pluse(2, config["velocity_low"])
+        #         self.set_velocoty_pluse(3, config["velocity_up"])
+        #         self.enter_absolute_position_mode(2, target_left)
+        #         self.enter_absolute_position_mode(3, target_right)
+        #         self.target_sent_flag = True
+        #         rospy.loginfo(f"下发目标: 左{target_left}, 右{target_right}")
 
-            # 判断是否到达目标（允许一定误差）
-            if (abs(self.left_position - target_left) < 1000 and
-                abs(self.right_position - target_right) < 1000):
-                # 切换目标
-                self.position_target_flag = not self.position_target_flag
-                self.target_sent_flag = False  # 允许下发新目标
+        #     # 判断是否到达目标（允许一定误差）
+        #     if (abs(self.left_position - target_left) < 1000 and
+        #         abs(self.right_position - target_right) < 1000):
+        #         # 切换目标
+        #         self.position_target_flag = not self.position_target_flag
+        #         self.target_sent_flag = False  # 允许下发新目标
 
-            # 刷子电机速度控制（同前）
-            brush_speed = config["velocity_brush"]
-            if self.last_brush_speed != brush_speed:
-                self.set_target_velocity(4, brush_speed)
-                self.last_brush_speed = brush_speed
+        #     # 刷子电机速度控制（同前）
+        #     brush_speed = config["velocity_brush"]
+        #     if self.last_brush_speed != brush_speed:
+        #         self.set_target_velocity(4, brush_speed)
+        #         self.last_brush_speed = brush_speed
         elif self.current_status == "DEBUG":
             # 处理DEBUG状态
             if self.current_status == "DEBUG":
@@ -609,7 +629,7 @@ class ServoDriveController:
     def handle_rotate_to_edge(self, config):
         """旋转机器人使其与边缘平行"""
         rotation_speed = config["rotation_speed"]
-        rotation_direction = -1 if self.active_side == "LEFT" else 1
+        rotation_direction = 1 if self.active_side == "LEFT" else -1
         
         # 根据出界侧确定旋转方向
         left_speed = rotation_speed * rotation_direction
@@ -652,7 +672,7 @@ class ServoDriveController:
         
         rospy.loginfo(f"微调迭代 {self.fine_tune_iterations}: 误差: {self.alignment_error:.1f}cm")
         
-        # 确定调整方向
+        # 确定调整方向，rotation_direction正负待定
         fine_tune_speed = config["fine_tune_speed"]
         rotation_direction = 1 if self.alignment_error > 0 else -1
         duration = min(0.1 + abs(self.alignment_error) / 100.0, 1.0)  # 根据误差调整旋转时间
@@ -678,7 +698,8 @@ class ServoDriveController:
             self.last_left_speed = 0
             self.last_right_speed = 0
             
-        # 发布校准完成消息
+        # 发布校准完成消息,重置IMU初值
+        self.initial_yaw = None
         self.publish_alignment_complete()
         
         # 短暂延时后恢复STOP状态
@@ -696,14 +717,19 @@ class ServoDriveController:
             rospy.loginfo(f"两侧均出界, 距离差: A={self.distance_a:.1f}, B={self.distance_b:.1f}, 误差={self.alignment_error:.1f}cm")
             #添加前进至边缘代码
             
+
+            
         else:
             # 只有一侧出界时，使用高度差作为误差估计
             # 初始出界时这一侧的距离值会骤增
+            # c 在左
             if self.active_side == "LEFT":
-                self.alignment_error = abs(self.distance_a - self.distance_c)
-            else:
                 self.alignment_error = abs(self.distance_c - self.distance_a)
-            rospy.loginfo(f"单侧出界, A={self.distance_a:.1f}, C={self.distance_c:.1f}, 估计误差={self.alignment_error:.1f}cm")
+                rospy.loginfo(f"单侧出界, RIGHT_A={self.distance_a:.1f}, LEFT_C={self.distance_c:.1f}, 估计误差={self.alignment_error:.1f}cm")
+
+            else:
+                self.alignment_error = abs(self.distance_a - self.distance_c)
+                rospy.loginfo(f"单侧出界, RIGHT_A={self.distance_a:.1f}, LEFT_C={self.distance_c:.1f}, 估计误差={self.alignment_error:.1f}cm")
     
     def publish_alignment_complete(self):
         """发布校准完成消息"""
@@ -712,6 +738,7 @@ class ServoDriveController:
             "active_side": self.active_side,
             "alignment_error": self.alignment_error,
             "iterations": self.fine_tune_iterations,
+            "imu_adjust": self.initial_yaw,
             "timestamp": time.time(),
             "message": f"边缘校准完成 - {self.active_side}侧出界检测, 最终误差: {self.alignment_error:.1f}cm"
         }
@@ -760,8 +787,8 @@ def main():
     rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
-    #t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
-    #t.start()
+    t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
+    t.start()
     try:
     # 每0.5秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.2), controller.execute_state)
