@@ -71,11 +71,7 @@ class ServoDriveController:
                 "velocity_up": 250 * rate,
                 "velocity_low": -250 * rate,
                 "velocity_brush": 0,
-                # "edge_detection_threshold": 200,  # 边缘检测阈值(cm)
-                # "alignment_threshold": 3,         # 对齐误差阈值(cm)
-                # "alignment_speed": 50 * rate,     # 对齐速度
-                # "alignment_distance": 1000 * rate, # 对齐移动距离
-                # "timeout": 20.0,                # 最大校准时间(秒)
+                
                 "edge_detection_threshold": 200,  # 出界检测阈值(mm)
                 "alignment_threshold": 50,         # 对齐误差阈值(mm)
                 "approach_speed": 200 * rate,      # 接近速度
@@ -571,7 +567,7 @@ class ServoDriveController:
         #         self.last_brush_speed = brush_speed
         elif self.current_status == "START": #临时调试，后续修改为DEBUG
             # 处理DEBUG状态
-            if self.current_status == "DEBUG":
+            if self.current_status == "START":
                 self.handle_debug_state()
    
     def handle_debug_state(self):
