@@ -16,8 +16,8 @@ import select
 rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    def __init__(self, channel='vcan0', interface='socketcan'):
-    # def __init__(self, channel='can0', interface='socketcan'):
+    # def __init__(self, channel='vcan0', interface='socketcan'):
+    def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         self.last_left_speed = 0
         self.last_right_speed = 0
@@ -273,8 +273,8 @@ class ServoDriveController:
                 elif relative_yaw < -180:
                     relative_yaw += 360
 
-            # self.imu_yaw = relative_yaw
-            self.imu_yaw = 0
+            self.imu_yaw = relative_yaw
+            # self.imu_yaw = 0
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
@@ -346,8 +346,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -569,7 +569,7 @@ class ServoDriveController:
         #     if self.last_brush_speed != brush_speed:
         #         self.set_target_velocity(4, brush_speed)
         #         self.last_brush_speed = brush_speed
-        elif self.current_status == "DEBUG":
+        elif self.current_status == "START": #临时调试，后续修改为DEBUG
             # 处理DEBUG状态
             if self.current_status == "DEBUG":
                 self.handle_debug_state()
