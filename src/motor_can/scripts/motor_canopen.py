@@ -16,8 +16,8 @@ import select
 rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    # def __init__(self, channel='vcan0', interface='socketcan'):
-    def __init__(self, channel='can0', interface='socketcan'):
+    def __init__(self, channel='vcan0', interface='socketcan'):
+    # def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         self.last_left_speed = 0
         self.last_right_speed = 0
@@ -39,8 +39,7 @@ class ServoDriveController:
                 "position_right": -65188,  # 右侧电机目标位置              651883
                 "velocity_up": 250 * rate,
                 "velocity_low": 250 * rate, #自动速度无法设置负值，二者速度相同
-                "velocity_brush": -100 * rate, #后续添加距离到位后反转的判断
-
+                "velocity_brush": -100 * rate  #后续添加距离到位后反转的判断
             },
 
             "STOP": {  # 停止状态
@@ -77,8 +76,8 @@ class ServoDriveController:
                 # "alignment_speed": 50 * rate,     # 对齐速度
                 # "alignment_distance": 1000 * rate, # 对齐移动距离
                 # "timeout": 20.0,                # 最大校准时间(秒)
-                "edge_detection_threshold": 200,  # 出界检测阈值(cm)
-                "alignment_threshold": 3,         # 对齐误差阈值(cm)
+                "edge_detection_threshold": 200,  # 出界检测阈值(mm)
+                "alignment_threshold": 50,         # 对齐误差阈值(mm)
                 "approach_speed": 200 * rate,      # 接近速度
                 "rotation_speed": 100 * rate,       # 旋转速度
                 "fine_tune_speed": 50 * rate,      # 微调速度
@@ -274,8 +273,8 @@ class ServoDriveController:
                 elif relative_yaw < -180:
                     relative_yaw += 360
 
-            self.imu_yaw = relative_yaw
-            # self.imu_yaw = 0
+            # self.imu_yaw = relative_yaw
+            self.imu_yaw = 0
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
@@ -347,8 +346,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -376,8 +375,9 @@ class ServoDriveController:
         # DEBUG
         key_mapping_debug = {
             '1': "ROTATE_TO_EDGE",
-            '2': "FINE_TUNE",
-            '3': "COMPLETE",
+            '2': "BACKWARD_TIME",
+            '3': "FINE_TUNE",
+            '4': "COMPLETE",
         }       
         if key in key_mapping_debug:
             self.debug_phase = key_mapping_debug[key]
@@ -386,32 +386,32 @@ class ServoDriveController:
 
     def distance_callback(self, msg):
         """超声波距离检测回调"""
-        if msg.distance_a < 200:
+        if msg.distance_a < 250:
             self.sensors_status |= 0x01  # 设置传感器A状态
         else:
             self.sensors_status &= ~0x01
-        if msg.distance_b < 200:
+        if msg.distance_b < 250:
             self.sensors_status |= 0x02
         else:
             self.sensors_status &= ~0x02
-        if msg.distance_c < 200:
+        if msg.distance_c < 250:
             self.sensors_status |= 0x04
         else:
             self.sensors_status &= ~0x04
-        if msg.distance_d < 200:
+        if msg.distance_d < 250:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
         # 前进边缘检测
         # if not self.stop_flag and self.current_status == self.status_list[1]:  # FORWARD
         if self.current_status == self.status_list[1]:  # FORWARD
-            if (msg.distance_a > 200):
+            if (msg.distance_a > 250):
                 self.set_state("STOP")
                 time.sleep(1)
                 self.set_state("BACKWARD")
 
         if self.current_status == self.status_list[2]:  # BACKWARD
-            if (msg.distance_b > 200):
+            if (msg.distance_b > 250):
                 self.set_state("STOP")
                 time.sleep(1)
                 self.set_state("FORWARD")
@@ -423,7 +423,6 @@ class ServoDriveController:
             edge_threshold = config["edge_detection_threshold"]
             self.distance_a = msg.distance_a
             self.distance_c = msg.distance_c
-
             
             # 检测哪个传感器先出界
             if self.debug_phase == "APPROACH_EDGE" and not self.edge_detected:
@@ -435,7 +434,6 @@ class ServoDriveController:
                     self.active_side = "RIGHT"
                     self.edge_detected = True
                     rospy.loginfo(f"右侧出界检测! 距离B: {self.distance_a:.1f}mm")
-
 
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
@@ -591,6 +589,9 @@ class ServoDriveController:
         # 状态机处理
         if self.debug_phase == "APPROACH_EDGE":
             self.handle_approach_edge(config)
+        
+        elif self.debug_phase == "BACKWARD_TIME":
+            self.handle_backward_time(config)
             
         elif self.debug_phase == "ROTATE_TO_EDGE":
             self.handle_rotate_to_edge(config)
@@ -625,15 +626,39 @@ class ServoDriveController:
             self.last_left_speed = 0
             self.last_right_speed = 0
             rospy.sleep(0.5)  # 短暂停顿
-    
+
+    def handle_backward_time(self, config):
+        """运行指定时间后退回边缘"""
+        # 设置慢速前进
+        if self.last_left_speed != config["approach_speed"] or self.last_right_speed != -config["approach_speed"]:
+            self.set_target_velocity(2, -config["approach_speed"])
+            self.set_target_velocity(3, config["approach_speed"])
+            self.last_left_speed = -config["approach_speed"]
+            self.last_right_speed = config["approach_speed"]
+            rospy.loginfo("正在慢速回退...")
+
+        # 持续3秒后重新执行第一步矫正
+        rospy.sleep(3.0)        
+        self.debug_phase = "APPROACH_EDGE"
+        # 停止移动
+        self.set_target_velocity(2, 0)
+        self.set_target_velocity(3, 0)
+        self.last_left_speed = 0
+        self.last_right_speed = 0
+        rospy.sleep(0.5)  # 短暂停顿
+
     def handle_rotate_to_edge(self, config):
         """旋转机器人使其与边缘平行"""
         rotation_speed = config["rotation_speed"]
         rotation_direction = 1 if self.active_side == "LEFT" else -1
         
-        # 根据出界侧确定旋转方向
-        left_speed = rotation_speed * rotation_direction
-        right_speed = rotation_speed * (-rotation_direction)
+        # 根据出界侧确定旋转方向,修改为单侧调整，不旋转
+        if rotation_direction == 1:
+            left_speed = rotation_speed * rotation_direction
+            right_speed = 0
+        elif rotation_direction == -1:
+            left_speed = 0
+            right_speed = rotation_speed * (-rotation_direction)
         
         # 设置旋转速度
         if self.last_left_speed != left_speed or self.last_right_speed != right_speed:
@@ -712,13 +737,14 @@ class ServoDriveController:
         threshold = self.status_config["DEBUG"]["edge_detection_threshold"]
         
         # 如果另一侧也出界了，计算两侧距离差
-        if (self.distance_a >= threshold and self.distance_b >= threshold):
-            self.alignment_error = abs(self.distance_a - self.distance_b)
-            rospy.loginfo(f"两侧均出界, 距离差: A={self.distance_a:.1f}, B={self.distance_b:.1f}, 误差={self.alignment_error:.1f}cm")
-            #添加前进至边缘代码
-            
-
-            
+        if (self.distance_a >= threshold and self.distance_c >= threshold):
+            self.alignment_error = abs(self.distance_a - self.distance_c)
+            rospy.loginfo(f"两侧均出界, 距离差: RIGHT_A={self.distance_a:.1f}, RIGHT_C={self.distance_c:.1f}, 误差={self.alignment_error:.1f}cm")
+            #添加后退至边缘代码
+            rospy.loginfo("均出界，暂时不能矫正")
+            # self.debug_phase == "FAILED"
+            # self.set_state("STOP")
+            self.debug_phase = "BACKWARD_TIME"
         else:
             # 只有一侧出界时，使用高度差作为误差估计
             # 初始出界时这一侧的距离值会骤增
