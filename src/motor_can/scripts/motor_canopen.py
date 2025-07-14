@@ -19,12 +19,19 @@ class ServoDriveController:
     # def __init__(self, channel='vcan0', interface='socketcan'):
     def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
+        self.last_left_speed = 0
+        self.last_right_speed = 0
+        self.last_brush_speed = 0
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态
             "FORWARD",  # 前进状态
             "BACKWARD",  # 后退状态
             "START",  # 位置模式自动运行状态
+            "LOADING", # 进仓
+            "UNLOADING", # 出仓
+            "UPSTOP", #上电机停
+            "LOWSTOP", #下电机停
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
@@ -42,25 +49,54 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                #下发100到电机减速20：1，实际为5RPM ，发250最终12.5RPM，速度0.078m/s
-                "velocity_up": 637 * rate,   #实际速度0.2m/s
-                "velocity_low": -637 * rate,
-                "velocity_brush": 0 * rate
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
+                "velocity_brush": -1500 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -637 * rate,
-                "velocity_low": 637 * rate,
-                "velocity_brush": 1500 * rate   #滚刷速比8
+                "velocity_up": -250 * rate,
+                "velocity_low": 250 * rate,
+                "velocity_brush": 1500 * rate
+            },
+            "LOADING": {
+                "velocity_up": 250 *rate,
+                "velocity_low": -250 *rate,
+                "velocity_brush": 0
+            },
+            "UNLOADING":{
+                "velocity_up": -250 *rate,
+                "velocity_low": 250 *rate,
+                "velocity_brush": 0
+            },
+            "UPSTOP":{
+                "velocity_up": 0,
+                "velocity_low": self.last_right_speed,
+                "velocity_brush": self.last_brush_speed
+            },
+            "LOWSTOP":{
+                "velocity_up": self.last_left_speed,
+                "velocity_low": 0,
+                "velocity_brush": self.last_brush_speed
             }
+
+            # "FORWARD": {  # 测试电机功耗前进状态
+            #     #下发100到电机减速20：1，实际为5RPM ，发250最终12.5RPM，速度0.078m/s
+            #     "velocity_up": 637 * rate,   #实际速度0.2m/s
+            #     "velocity_low": -637 * rate,
+            #     "velocity_brush": 0 * rate
+            # },
+            # "BACKWARD": {  # 测试滚刷启动总功耗后退状态
+            #     "velocity_up": -637 * rate,
+            #     "velocity_low": 637 * rate,
+            #     "velocity_brush": 1500 * rate   #滚刷速比8
+            # }
         }
         self.last_state = None  # 记录上一次的状态
         self.current_status = self.status_list[0]  # 当前默认停止状态
         self.current_velocity_up = 0   # ID = 3
         self.current_velocity_low = 0  # ID = 2
         self.current_velocity_brush = 0  # ID = 4
-        self.last_left_speed = None
-        self.last_right_speed = None
-        self.last_brush_speed = None
+
         self.stop_flag = False   
         self.position_engaged = False           # 标记位置模式是否已激活
         self.position_mode_configured = False  # 标记位置模式是否已配置
@@ -79,9 +115,11 @@ class ServoDriveController:
         self.initial_yaw = None
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
+        self.side_detected = False
+        self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
 
         # PID参数
-        self.pid_kp = 50.0
+        self.pid_kp = 100.0
         self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
         self.pid_kd = 0.5  # 如果系统有震荡，可以调整微分增益来抑制震荡
         self.pid_integral = 0.0
@@ -107,11 +145,16 @@ class ServoDriveController:
             self.position_engaged = False
             self.position_mode_configured = False
             self.need_position_mode_init = True
+        # 进入单侧停止时，记录当前运动状态
+        if new_state in ["UPSTOP", "LOWSTOP"]:
+            if self.current_status in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
+                self.prev_motion_state = self.current_status
 
         self.current_status = new_state
         self.last_state = self.current_status
         rospy.loginfo(f"状态已更新为: {self.current_status}")
         return True
+    
     
     def enter_absolute_position_mode(self, motor_id, position):
         """设置电机进入绝对位置模式并设置目标位置"""
@@ -264,6 +307,9 @@ class ServoDriveController:
     def enable_drive(self, motor_id):
         self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
     
+    def disable_drive(self, motor_id):
+        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x06, 0x00, 0x00, 0x00])
+        
     def start_motor(self, motor_id):
         if not 1 <= motor_id <= 127:
             raise ValueError(f"电机ID {motor_id} 超出有效范围 (1-127)")
@@ -284,6 +330,9 @@ class ServoDriveController:
         self.set_target_velocity(2, 0)
         self.set_target_velocity(3, 0)
         self.set_target_velocity(4, 0)
+        self.disable_drive(2, 0)
+        self.disable_drive(3, 0)
+        self.disable_drive(4, 0)
 
         self.bus.shutdown()
 
@@ -306,7 +355,11 @@ class ServoDriveController:
             's': "STOP",
             'f': "FORWARD",
             'b': "BACKWARD",
-            'a': "START"  # 位置模式自动运行状态
+            'a': "START",  # 位置模式自动运行状态
+            'l': "LOADING",
+            'u': "UNLOADING",
+            '1': "UPSTOP",
+            '2': "LOWSTOP"
         }
         if key in key_mapping:
             self.set_state(key_mapping[key])
@@ -344,13 +397,27 @@ class ServoDriveController:
                 self.set_state("STOP")
                 time.sleep(1)
                 self.set_state("FORWARD")
+        if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
+            if msg.distance_a > 250 and msg.distance_c > 250:
+                self.set_state("STOP")
+                self.side_detected = False
 
+            elif (msg.distance_a > 250 and msg.distance_c < 250):
+                self.set_state("LOWSTOP")
+            elif (msg.distance_c > 250 and msg.distance_a < 250):
+                self.set_state("UPSTOP")
+            time.sleep(1)
+            # 发布两侧边缘到位的完成消息
+        # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
+            # if (msg.distance_a > 250):
+                # self.set_state("STOP")
+                # time.sleep(1)
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
         self.pid_integral += error
         derivative = error - self.pid_last_error
-        if abs(error) > 0.3:  # 如果误差小于0.3度，则不进行修正
+        if abs(error) > 0.2:  # 如果误差小于0.3度，则不进行修正
             correction = (self.pid_kp * error +
                         self.pid_ki * self.pid_integral +
                         self.pid_kd * derivative) * 10  # 放大修正量
@@ -364,17 +431,8 @@ class ServoDriveController:
         # 实时根据当前状态和IMU矫正左右轮速度
         if self.need_position_mode_init and self.current_status == "START":
             config = self.status_config["START"]
-            # 设置两轮为位置模式
-            self.enter_absolute_position_mode(2, config["position_left"])
-            self.enter_absolute_position_mode(3, config["position_right"])
-            self.set_position_mode(2)
-            self.set_position_mode(3)
-            self.need_position_mode_init = False
-            rospy.loginfo("已重新初始化两轮为位置模式")
-        # if self.need_speed_mode_init:
-        if self.need_speed_mode_init and self.current_status in ["FORWARD", "BACKWARD", "STOP"]:
 
-            rospy.loginfo("从START切换到速度模式，重新初始化电机...")
+            rospy.loginfo("设置速度模式，初始化电机...")
             config = self.load_config()       
 
             for motor in config["motors"]:
@@ -397,7 +455,7 @@ class ServoDriveController:
             self.need_speed_mode_init = False
             rospy.loginfo("速度模式初始化完成")
 
-        if self.current_status in ["FORWARD", "BACKWARD"] and -15 < self.imu_yaw < 15:
+        if self.current_status in ["FORWARD", "BACKWARD"] and -5 < self.imu_yaw < 5:
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
@@ -416,12 +474,27 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
+            if -5 < self.imu_yaw < -3:
+                lowstopflag = True
+            if 3 < self.imu_yaw < 5:
+                upstopflag =True
+            if -1 < self.imu_yaw < 0 and lowstopflag:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                lowstopflag = False
+                # self.initial_yaw = 0
+            
+            if 0 < self.imu_yaw < 1 and upstopflag:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                upstopflag = False
+                # self.initial_yaw = 0
             # 实时发布状态
             self.current_velocity_low = left_speed
             self.current_velocity_up = right_speed
             self.current_velocity_brush = brush_speed
             # self.publish_state()
-        elif self.current_status == "STOP" or not -15 < self.imu_yaw <15:
+        elif self.current_status == "STOP" or not -5 < self.imu_yaw < 5:
             if (self.last_left_speed != 0 or
                 self.last_right_speed != 0 or
                 self.last_brush_speed != 0):
@@ -429,9 +502,14 @@ class ServoDriveController:
                 self.set_target_velocity(2, 0)
                 self.set_target_velocity(3, 0)
                 self.set_target_velocity(4, 0)
+                self.disable_drive(2, 0)
+                self.disable_drive(3, 0)
+                self.disable_drive(4, 0)
                 self.last_left_speed = 0
                 self.last_right_speed = 0
                 self.last_brush_speed = 0
+                self.need_speed_mode_init = True
+
 
             self.current_velocity_low = 0
             self.current_velocity_up = 0
@@ -440,46 +518,71 @@ class ServoDriveController:
         elif self.current_status == "START":
             config = self.status_config["START"]
             # 读取当前位置
-            left_pos = self.read_motor_position(2)
-            right_pos = self.read_motor_position(3)
-            if left_pos is not None:
-                self.left_position = left_pos
-            if right_pos is not None:
-                self.right_position = right_pos
+        #     left_pos = self.read_motor_position(2)
+        #     right_pos = self.read_motor_position(3)
+        #     if left_pos is not None:
+        #         self.left_position = left_pos
+        #     if right_pos is not None:
+        #         self.right_position = right_pos
 
-            # 状态机：目标在4096/-4096 <-> 0之间切换
-            # 用self.position_target_flag标记当前目标（True: 4096/-4096, False: 0）
-            if not hasattr(self, "position_target_flag"):
-                self.position_target_flag = True  # 初始目标为4096/-4096
+        #     # 状态机：目标在4096/-4096 <-> 0之间切换
+        #     # 用self.position_target_flag标记当前目标（True: 4096/-4096, False: 0）
+        #     if not hasattr(self, "position_target_flag"):
+        #         self.position_target_flag = True  # 初始目标为4096/-4096
 
-            if self.position_target_flag:
-                target_left = config["position_left"]
-                target_right = config["position_right"]
-            else:
-                target_left = 0
-                target_right = 0
-        # 只在切换目标时下发一次目标指令
-            if not self.target_sent_flag:
-                self.set_velocoty_pluse(2, config["velocity_low"])
-                self.set_velocoty_pluse(3, config["velocity_up"])
-                self.enter_absolute_position_mode(2, target_left)
-                self.enter_absolute_position_mode(3, target_right)
-                self.target_sent_flag = True
-                rospy.loginfo(f"下发目标: 左{target_left}, 右{target_right}")
+        #     if self.position_target_flag:
+        #         target_left = config["position_left"]
+        #         target_right = config["position_right"]
+        #     else:
+        #         target_left = 0
+        #         target_right = 0
+        # # 只在切换目标时下发一次目标指令
+        #     if not self.target_sent_flag:
+        #         self.set_velocoty_pluse(2, config["velocity_low"])
+        #         self.set_velocoty_pluse(3, config["velocity_up"])
+        #         self.enter_absolute_position_mode(2, target_left)
+        #         self.enter_absolute_position_mode(3, target_right)
+        #         self.target_sent_flag = True
+        #         rospy.loginfo(f"下发目标: 左{target_left}, 右{target_right}")
 
-            # 判断是否到达目标（允许一定误差）
-            if (abs(self.left_position - target_left) < 1000 and
-                abs(self.right_position - target_right) < 1000):
-                # 切换目标
-                self.position_target_flag = not self.position_target_flag
-                self.target_sent_flag = False  # 允许下发新目标
+        #     # 判断是否到达目标（允许一定误差）
+        #     if (abs(self.left_position - target_left) < 1000 and
+        #         abs(self.right_position - target_right) < 1000):
+        #         # 切换目标
+        #         self.position_target_flag = not self.position_target_flag
+        #         self.target_sent_flag = False  # 允许下发新目标
 
-            # 刷子电机速度控制（同前）
-            brush_speed = config["velocity_brush"]
-            if self.last_brush_speed != brush_speed:
+        #     # 刷子电机速度控制（同前）
+        #     brush_speed = config["velocity_brush"]
+        #     if self.last_brush_speed != brush_speed:
+        #         self.set_target_velocity(4, brush_speed)
+        #         self.last_brush_speed = brush_speed
+        elif self.current_status in ["LOADING", "UNLOADING"]:
+            correction = self.pid_correction(self.imu_yaw)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+            # 通过上下双传感器检测是否到位,哪边到位哪边停，直到两边均到位
+            self.side_detected = True
+            # 左右轮速度矫正（左轮-修正，右轮+修正）
+            if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
+                
+                self.set_target_velocity(2, left_speed)
+                self.set_target_velocity(3, right_speed)
                 self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
+            # 实时发布状态
+            self.current_velocity_low = left_speed
+            self.current_velocity_up = right_speed
+            self.current_velocity_brush = brush_speed
             # # 设置移动速度（只需每次切换目标时设置一次即可）
             # self.set_velocoty_pluse(2, config["velocity_low"])
             # self.set_velocoty_pluse(3, config["velocity_up"])
