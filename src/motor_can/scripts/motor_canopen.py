@@ -109,7 +109,7 @@ class ServoDriveController:
         self.target_sent_flag = False  # 标记目标指令是否已下发
 
         self.need_speed_mode_init = False
-        self.need_position_mode_init = False
+        self.enable_drive_flag = False
         self.stop_velocity = 0  # 停止速度
         self.imu_yaw = 0.0  # IMU偏航角 单位度
         self.initial_yaw = None
@@ -137,14 +137,14 @@ class ServoDriveController:
         if new_state == self.current_status:
             return False  # 状态未改变
         # 检查是否从START切换到其他模式
-        if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
-            self.need_speed_mode_init = True
+        # if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
+        #     self.need_speed_mode_init = True
 
          # 状态改变时重置位置模式标志
         if new_state == "START":
             self.position_engaged = False
             self.position_mode_configured = False
-            self.need_position_mode_init = True
+            self.enable_drive_flag = True
         # 进入单侧停止时，记录当前运动状态
         if new_state in ["UPSTOP", "LOWSTOP"]:
             if self.current_status in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
@@ -330,9 +330,9 @@ class ServoDriveController:
         self.set_target_velocity(2, 0)
         self.set_target_velocity(3, 0)
         self.set_target_velocity(4, 0)
-        self.disable_drive(2, 0)
-        self.disable_drive(3, 0)
-        self.disable_drive(4, 0)
+        self.disable_drive(2)
+        self.disable_drive(3)
+        self.disable_drive(4)
 
         self.bus.shutdown()
 
@@ -429,7 +429,7 @@ class ServoDriveController:
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
-        if self.need_position_mode_init and self.current_status == "START":
+        if self.enable_drive_flag and self.current_status == "START":
             config = self.status_config["START"]
 
             rospy.loginfo("设置速度模式，初始化电机...")
@@ -452,10 +452,55 @@ class ServoDriveController:
                     )
                 except Exception as e:
                     rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
-            self.need_speed_mode_init = False
+            self.enable_drive_flag = False
             rospy.loginfo("速度模式初始化完成")
+        if self.current_status in ["FORWARD", "BACKWARD"] and -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
+            
+            lowstopflag=False
+            upstopflag=False
+            if -5 < self.imu_yaw < -2: # IMU负数，角度偏下需要上面停
+                upstopflag = True
+                self.set_state("UPSTOP")
 
-        if self.current_status in ["FORWARD", "BACKWARD"] and -5 < self.imu_yaw < 5:
+            if 2 < self.imu_yaw < 5:
+                lowstopflag =True
+                self.set_state("LOWSTOP")
+
+            if -1 < self.imu_yaw < 0 and upstopflag:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                upstopflag = False
+                # self.initial_yaw = 0
+            
+            if 0 < self.imu_yaw < 1 and lowstopflag:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                lowstopflag = False
+                # self.initial_yaw = 0
+            correction = self.pid_correction(self.imu_yaw)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+            if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
+                
+                self.set_target_velocity(2, left_speed)
+                self.set_target_velocity(3, right_speed)
+                self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+            
+            # 实时发布状态
+            self.current_velocity_low = left_speed
+            self.current_velocity_up = right_speed
+            self.current_velocity_brush = brush_speed
+        if self.current_status in ["FORWARD", "BACKWARD"] and -2 < self.imu_yaw < 2:
+
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
@@ -474,21 +519,7 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            if -5 < self.imu_yaw < -3:
-                lowstopflag = True
-            if 3 < self.imu_yaw < 5:
-                upstopflag =True
-            if -1 < self.imu_yaw < 0 and lowstopflag:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                lowstopflag = False
-                # self.initial_yaw = 0
             
-            if 0 < self.imu_yaw < 1 and upstopflag:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                upstopflag = False
-                # self.initial_yaw = 0
             # 实时发布状态
             self.current_velocity_low = left_speed
             self.current_velocity_up = right_speed
@@ -502,9 +533,9 @@ class ServoDriveController:
                 self.set_target_velocity(2, 0)
                 self.set_target_velocity(3, 0)
                 self.set_target_velocity(4, 0)
-                self.disable_drive(2, 0)
-                self.disable_drive(3, 0)
-                self.disable_drive(4, 0)
+                self.disable_drive(2)
+                self.disable_drive(3)
+                self.disable_drive(4)
                 self.last_left_speed = 0
                 self.last_right_speed = 0
                 self.last_brush_speed = 0
@@ -664,8 +695,8 @@ def main():
     rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
-    #t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
-    #t.start()
+    t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
+    t.start()
     try:
     # 每0.5秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.2), controller.execute_state)
