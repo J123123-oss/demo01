@@ -117,6 +117,8 @@ class ServoDriveController:
         self.sensors_status = 0 #表示4个超声波传感器触发状态
         self.side_detected = False
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
+        self.is_upstop = False
+        self.is_lowstop = False
 
         # PID参数
         self.pid_kp = 100.0
@@ -146,9 +148,18 @@ class ServoDriveController:
             self.position_mode_configured = False
             self.enable_drive_flag = True
         # 进入单侧停止时，记录当前运动状态
-        if new_state in ["UPSTOP", "LOWSTOP"]:
-            if self.current_status in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
-                self.prev_motion_state = self.current_status
+        if new_state == "UPSTOP":
+            self.prev_motion_state = self.last_state
+            self.last_left_speed = 0
+            # 右轮保持原速度
+            self.set_target_velocity(2, 0)
+            self.set_target_velocity(3, self.last_right_speed)
+        elif new_state == "LOWSTOP":
+            self.prev_motion_state = self.last_state
+            self.last_right_speed = 0
+            # 左轮保持原速度
+            self.set_target_velocity(2, self.last_left_speed)
+            self.set_target_velocity(3, 0)
 
         self.current_status = new_state
         self.last_state = self.current_status
@@ -429,6 +440,7 @@ class ServoDriveController:
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
+        # 1. START状态：速度模式初始化电机
         if self.enable_drive_flag and self.current_status == "START":
             config = self.status_config["START"]
 
@@ -454,77 +466,69 @@ class ServoDriveController:
                     rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
             self.enable_drive_flag = False
             rospy.loginfo("速度模式初始化完成")
-        if self.current_status in ["FORWARD", "BACKWARD"] and -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
-            
-            lowstopflag=False
-            upstopflag=False
-            if -5 < self.imu_yaw < -2: # IMU负数，角度偏下需要上面停
-                upstopflag = True
+
+        # 2. FORWARD/BACKWARD状态：IMU矫正+单侧停止
+        if self.current_status in ["FORWARD", "BACKWARD"]:
+            correction = self.pid_correction(self.imu_yaw)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+            if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
+                
+                self.set_target_velocity(2, left_speed)
+                self.set_target_velocity(3, right_speed)
+                self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+
+            if -5 < self.imu_yaw < -2:
                 self.set_state("UPSTOP")
-
+                self.is_upstop = True
             if 2 < self.imu_yaw < 5:
-                lowstopflag =True
                 self.set_state("LOWSTOP")
+                self.is_lowstop = True
 
-            if -1 < self.imu_yaw < 0 and upstopflag:
+            if self.is_upstop and -1 < self.imu_yaw < 0:
                 if self.prev_motion_state:
                     self.set_state(self.prev_motion_state)
-                upstopflag = False
-                # self.initial_yaw = 0
+                self.is_upstop = False
+
+            if self.is_lowstop and 0 < self.imu_yaw < 1:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                self.is_lowstop = False
+                
             
-            if 0 < self.imu_yaw < 1 and lowstopflag:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                lowstopflag = False
-                # self.initial_yaw = 0
-            correction = self.pid_correction(self.imu_yaw)
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
-            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            # 实时发布状态
+            self.current_velocity_low = left_speed
+            self.current_velocity_up = right_speed
+            self.current_velocity_brush = brush_speed
+
+        # 3. 单侧停止状态（UPSTOP/LOWSTOP）
+        elif self.current_status in ["UPSTOP", "LOWSTOP"]:
+            left_speed = self.status_config[self.current_status]["velocity_up"]
+            right_speed = self.status_config[self.current_status]["velocity_low"]
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
-                
                 self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(3, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            
-            # 实时发布状态
             self.current_velocity_low = left_speed
             self.current_velocity_up = right_speed
             self.current_velocity_brush = brush_speed
-        if self.current_status in ["FORWARD", "BACKWARD"] and -2 < self.imu_yaw < 2:
 
-            correction = self.pid_correction(self.imu_yaw)
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
-            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-            # 左右轮速度矫正（左轮-修正，右轮+修正）
-            if (self.last_left_speed != left_speed or
-                self.last_right_speed != right_speed or
-                self.last_brush_speed != brush_speed):
-                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
-                
-                self.set_target_velocity(2, left_speed)
-                self.set_target_velocity(3, right_speed)
-                self.set_target_velocity(4, brush_speed)
-                self.last_left_speed = left_speed
-                self.last_right_speed = right_speed
-                self.last_brush_speed = brush_speed
-            
-            # 实时发布状态
-            self.current_velocity_low = left_speed
-            self.current_velocity_up = right_speed
-            self.current_velocity_brush = brush_speed
-            # self.publish_state()
+        # 4. STOP状态或IMU角度异常
         elif self.current_status == "STOP" or not -5 < self.imu_yaw < 5:
             if (self.last_left_speed != 0 or
                 self.last_right_speed != 0 or
@@ -588,6 +592,8 @@ class ServoDriveController:
         #     if self.last_brush_speed != brush_speed:
         #         self.set_target_velocity(4, brush_speed)
         #         self.last_brush_speed = brush_speed
+
+        # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测
         elif self.current_status in ["LOADING", "UNLOADING"]:
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
