@@ -399,36 +399,36 @@ class ServoDriveController:
         # if not self.stop_flag and self.current_status == self.status_list[1]:  # FORWARD
         if self.current_status == self.status_list[1]:  # FORWARD
             if (msg.distance_a > 250):
-                self.set_state("STOP")
-                time.sleep(1)
+                # self.set_state("STOP")
+                # time.sleep(1)
                 self.set_state("BACKWARD")
 
         if self.current_status == self.status_list[2]:  # BACKWARD
             if (msg.distance_b > 250):
-                self.set_state("STOP")
-                time.sleep(1)
+                # self.set_state("STOP")
+                # time.sleep(1)
                 self.set_state("FORWARD")
 
         # 进出仓状态并设置执行动作
-        # if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
-        #     if msg.distance_a > 250 and msg.distance_c > 250:
-        #         self.set_state("STOP")
-        #         self.side_detected = False
-        #         time.sleep(1)
-        #     elif (msg.distance_a > 250 and msg.distance_c < 250):
-        #         self.set_state("LOWSTOP")
-        #         #确保停到位
-        #         time.sleep(2)
-        #         self.set_state("STOP")
-        #     elif (msg.distance_c > 250 and msg.distance_a < 250):
-        #         self.set_state("UPSTOP")
-        #         time.sleep(2)
-        #         self.set_state("STOP")
+        if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
+            if msg.distance_a > 250 and msg.distance_c > 250:
+                self.set_state("STOP")
+                self.side_detected = False
+                time.sleep(1)
+            elif (msg.distance_a > 250 and msg.distance_c < 250):
+                self.set_state("LOWSTOP")
+                #确保停到位
+                time.sleep(2)
+                self.set_state("STOP")
+            elif (msg.distance_c > 250 and msg.distance_a < 250):
+                self.set_state("UPSTOP")
+                time.sleep(2)
+                self.set_state("STOP")
             # 发布两侧边缘到位的完成消息
-        # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
-            # if (msg.distance_a > 250):
-                # self.set_state("STOP")
-                # time.sleep(1)
+        if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
+            if (msg.distance_a > 250):
+                self.set_state("STOP")
+                time.sleep(1)
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -497,15 +497,20 @@ class ServoDriveController:
                 # time.sleep(1.0)
                 print("last_L_speed:",self.last_left_speed)
                 print("last_R_speed:",self.last_right_speed)
-                self.set_state("UPSTOP")
-                self.is_upstop = True
+                if self.current_status == "FORWARD":
+                    self.set_state("UPSTOP")
+                    self.is_upstop = True
+                else:
+                    self.set_state("LOWSTOP")
+                    self.is_lowstop = True
             if 2 < self.imu_yaw < 5:
                 # time.sleep(1.0)
-                self.set_state("LOWSTOP")
-                self.is_lowstop = True
-
-
-                
+                if self.current_status == "FORWARD":
+                    self.set_state("LOWSTOP")
+                    self.is_lowstop = True
+                else:
+                    self.set_state("UPSTOP")
+                    self.is_upstop = True                
             
             # 实时发布状态
             self.current_velocity_up = left_speed
@@ -526,6 +531,13 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
+            # 恢复上个状态
+            if self.is_upstop and -1 < self.imu_yaw < 0:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                    self.prev_motion_state = None
+                self.is_upstop = False
+
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
@@ -543,15 +555,12 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            # 恢复上个状态
-            if self.is_upstop and -1 < self.imu_yaw < 0:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                self.is_upstop = False
+
 
             if self.is_lowstop and 0 < self.imu_yaw < 1:
                 if self.prev_motion_state:
                     self.set_state(self.prev_motion_state)
+                    self.prev_motion_state = None
                 self.is_lowstop = False
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
