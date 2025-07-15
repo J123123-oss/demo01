@@ -16,8 +16,8 @@ import select
 rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    # def __init__(self, channel='vcan0', interface='socketcan'):
-    def __init__(self, channel='can0', interface='socketcan'):
+    def __init__(self, channel='vcan0', interface='socketcan'):
+    # def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         self.last_left_speed = 0
         self.last_right_speed = 0
@@ -27,7 +27,7 @@ class ServoDriveController:
             "STOP",  # 停止状态
             "FORWARD",  # 前进状态
             "BACKWARD",  # 后退状态
-            "START",  # 位置模式自动运行状态
+            "START",  # 速度模式初始化并使能
             "LOADING", # 进仓
             "UNLOADING", # 出仓
             "UPSTOP", #上电机停
@@ -35,12 +35,12 @@ class ServoDriveController:
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
-            "START": {  # 位置模式自动运行状态
-                "position_left": 65188,  # 左侧电机目标位置 由300cm转换而来  651883
-                "position_right": -65188,  # 右侧电机目标位置              651883
-                "velocity_up": 250 * rate,
-                "velocity_low": 250 * rate, #自动速度无法设置负值，二者速度相同
-                "velocity_brush": -100 * rate #后续添加距离到位后反转的判断
+            "START": {  # 速度模式初始化并使能
+                # "position_left": 65188,  # 左侧电机目标位置 由300cm转换而来  651883
+                # "position_right": -65188,  # 右侧电机目标位置              651883
+                # "velocity_up": 250 * rate,
+                # "velocity_low": 250 * rate, #自动速度无法设置负值，二者速度相同
+                # "velocity_brush": -100 * rate #后续添加距离到位后反转的判断
             },
 
             "STOP": {  # 停止状态
@@ -115,6 +115,7 @@ class ServoDriveController:
         self.initial_yaw = None
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
+        self.complete_state = False
         self.side_detected = False
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
         self.is_upstop = False
@@ -144,22 +145,15 @@ class ServoDriveController:
 
          # 状态改变时重置位置模式标志
         if new_state == "START":
+            self.complete_state = False
             self.position_engaged = False
             self.position_mode_configured = False
             self.enable_drive_flag = True
         # 进入单侧停止时，记录当前运动状态
         if new_state == "UPSTOP":
             self.prev_motion_state = self.last_state
-            # self.last_left_speed = 0
-            # 右轮保持原速度
-            # self.set_target_velocity(2, 0)
-            # self.set_target_velocity(3, self.last_right_speed)
         elif new_state == "LOWSTOP":
             self.prev_motion_state = self.last_state
-            # self.last_right_speed = 0
-            # 左轮保持原速度
-            # self.set_target_velocity(2, self.last_left_speed)
-            # self.set_target_velocity(3, 0)
 
         self.current_status = new_state
         self.last_state = self.current_status
@@ -241,7 +235,9 @@ class ServoDriveController:
             "velocity_brush": self.current_velocity_brush / rate,
             "imu_yaw": self.imu_yaw,  # IMU偏航角
             "sensors_status": self.sensors_status,  # 超声波传感器状态
-            "timestamp": time.time()
+            "complete_state":self.complete_state,
+            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+
         }
         self.state_pub.publish(json.dumps(state_msg))
 
@@ -348,8 +344,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -366,7 +362,7 @@ class ServoDriveController:
             's': "STOP",
             'f': "FORWARD",
             'b': "BACKWARD",
-            'a': "START",  # 位置模式自动运行状态
+            'a': "START",  # 速度模式初始化并使能
             'l': "LOADING",
             'u': "UNLOADING",
             '1': "UPSTOP",
@@ -401,12 +397,13 @@ class ServoDriveController:
             if (msg.distance_a > 250):
                 # self.set_state("STOP")
                 # time.sleep(1)
-                self.set_state("BACKWARD")
+                self.set_state("LOADING")
 
         if self.current_status == self.status_list[2]:  # BACKWARD
             if (msg.distance_b > 250):
                 # self.set_state("STOP")
                 # time.sleep(1)
+                #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
                 self.set_state("FORWARD")
 
         # 进出仓状态并设置执行动作
@@ -415,15 +412,20 @@ class ServoDriveController:
                 self.set_state("STOP")
                 self.side_detected = False
                 time.sleep(1)
+                self.complete_state = True
             elif (msg.distance_a > 250 and msg.distance_c < 250):
                 self.set_state("LOWSTOP")
                 #确保停到位
                 time.sleep(2)
                 self.set_state("STOP")
+                self.complete_state = False
+
             elif (msg.distance_c > 250 and msg.distance_a < 250):
                 self.set_state("UPSTOP")
                 time.sleep(2)
                 self.set_state("STOP")
+                self.complete_state = False
+
             # 发布两侧边缘到位的完成消息
         if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
             if (msg.distance_a > 250):
