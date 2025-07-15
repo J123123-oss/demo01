@@ -49,34 +49,34 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": 250 * rate,
-                "velocity_low": -250 * rate,
+                "velocity_up": -250 * rate,
+                "velocity_low": 250 * rate,
                 "velocity_brush": -1500 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -250 * rate,
-                "velocity_low": 250 * rate,
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
                 "velocity_brush": 1500 * rate
             },
             "LOADING": {
-                "velocity_up": 250 *rate,
-                "velocity_low": -250 *rate,
-                "velocity_brush": 0
-            },
-            "UNLOADING":{
                 "velocity_up": -250 *rate,
                 "velocity_low": 250 *rate,
                 "velocity_brush": 0
             },
+            "UNLOADING":{
+                "velocity_up": 250 *rate,
+                "velocity_low": -250 *rate,
+                "velocity_brush": 0
+            },
             "UPSTOP":{
                 "velocity_up": 0,
-                "velocity_low": 250*rate,
-                "velocity_brush": self.last_brush_speed
+                "velocity_low": 0,
+                "velocity_brush": 0
             },
             "LOWSTOP":{
-                "velocity_up": self.last_left_speed,
+                "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": self.last_brush_speed
+                "velocity_brush": 0
             }
 
             # "FORWARD": {  # 测试电机功耗前进状态
@@ -150,16 +150,16 @@ class ServoDriveController:
         # 进入单侧停止时，记录当前运动状态
         if new_state == "UPSTOP":
             self.prev_motion_state = self.last_state
-            self.last_left_speed = 0
+            # self.last_left_speed = 0
             # 右轮保持原速度
-            self.set_target_velocity(2, 0)
-            self.set_target_velocity(3, self.last_right_speed)
+            # self.set_target_velocity(2, 0)
+            # self.set_target_velocity(3, self.last_right_speed)
         elif new_state == "LOWSTOP":
             self.prev_motion_state = self.last_state
-            self.last_right_speed = 0
+            # self.last_right_speed = 0
             # 左轮保持原速度
-            self.set_target_velocity(2, self.last_left_speed)
-            self.set_target_velocity(3, 0)
+            # self.set_target_velocity(2, self.last_left_speed)
+            # self.set_target_velocity(3, 0)
 
         self.current_status = new_state
         self.last_state = self.current_status
@@ -408,16 +408,22 @@ class ServoDriveController:
                 self.set_state("STOP")
                 time.sleep(1)
                 self.set_state("FORWARD")
-        if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
-            if msg.distance_a > 250 and msg.distance_c > 250:
-                self.set_state("STOP")
-                self.side_detected = False
 
-            elif (msg.distance_a > 250 and msg.distance_c < 250):
-                self.set_state("LOWSTOP")
-            elif (msg.distance_c > 250 and msg.distance_a < 250):
-                self.set_state("UPSTOP")
-            time.sleep(1)
+        # 进出仓状态并设置执行动作
+        # if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
+        #     if msg.distance_a > 250 and msg.distance_c > 250:
+        #         self.set_state("STOP")
+        #         self.side_detected = False
+        #         time.sleep(1)
+        #     elif (msg.distance_a > 250 and msg.distance_c < 250):
+        #         self.set_state("LOWSTOP")
+        #         #确保停到位
+        #         time.sleep(2)
+        #         self.set_state("STOP")
+        #     elif (msg.distance_c > 250 and msg.distance_a < 250):
+        #         self.set_state("UPSTOP")
+        #         time.sleep(2)
+        #         self.set_state("STOP")
             # 发布两侧边缘到位的完成消息
         # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
             # if (msg.distance_a > 250):
@@ -498,27 +504,19 @@ class ServoDriveController:
                 self.set_state("LOWSTOP")
                 self.is_lowstop = True
 
-            if self.is_upstop and -1 < self.imu_yaw < 0:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                self.is_upstop = False
 
-            if self.is_lowstop and 0 < self.imu_yaw < 1:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                self.is_lowstop = False
                 
             
             # 实时发布状态
-            self.current_velocity_low = left_speed
-            self.current_velocity_up = right_speed
+            self.current_velocity_up = left_speed
+            self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
 
         # 3. 单侧停止状态（UPSTOP/LOWSTOP）
-        elif self.current_status in ["UPSTOP", "LOWSTOP"]:
-            left_speed = self.status_config[self.current_status]["velocity_up"]
-            right_speed = self.status_config[self.current_status]["velocity_low"]
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+        elif self.current_status == "UPSTOP":
+            left_speed = 0
+            right_speed = self.last_right_speed  # 右轮保持切换前速度
+            brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -528,8 +526,35 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            self.current_velocity_low = left_speed
-            self.current_velocity_up = right_speed
+            self.current_velocity_up = left_speed
+            self.current_velocity_low = right_speed
+            self.current_velocity_brush = brush_speed
+        
+        elif self.current_status == "LOWSTOP":
+            left_speed = self.last_left_speed  # 左轮保持切换前速度
+            right_speed = 0
+            brush_speed = self.last_brush_speed
+            if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, right_speed)
+                self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+            # 恢复上个状态
+            if self.is_upstop and -1 < self.imu_yaw < 0:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                self.is_upstop = False
+
+            if self.is_lowstop and 0 < self.imu_yaw < 1:
+                if self.prev_motion_state:
+                    self.set_state(self.prev_motion_state)
+                self.is_lowstop = False
+            self.current_velocity_up = left_speed
+            self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
 
         # 4. STOP状态或IMU角度异常
@@ -613,16 +638,16 @@ class ServoDriveController:
                 rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
                 
-                self.set_target_velocity(2, left_speed)
-                self.set_target_velocity(3, right_speed)
+                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
             # 实时发布状态
-            self.current_velocity_low = left_speed
-            self.current_velocity_up = right_speed
+            self.current_velocity_up = left_speed
+            self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
             # # 设置移动速度（只需每次切换目标时设置一次即可）
             # self.set_velocoty_pluse(2, config["velocity_low"])
