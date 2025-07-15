@@ -439,7 +439,8 @@ class ServoDriveController:
         if abs(error) > 0.2:  # 如果误差小于0.3度，则不进行修正
             correction = (self.pid_kp * error +
                         self.pid_ki * self.pid_integral +
-                        self.pid_kd * derivative) * 10  # 放大修正量
+                        self.pid_kd * derivative) 
+            # * 10  # 放大修正量
         else:
             correction = 0  # 在小范围内不进行调整
 
@@ -477,7 +478,7 @@ class ServoDriveController:
 
         # 2. FORWARD/BACKWARD状态：IMU矫正+单侧停止
         if self.current_status in ["FORWARD", "BACKWARD"]:
-            correction = self.pid_correction(self.imu_yaw)
+            correction = self.pid_correction(self.imu_yaw) * rate
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
@@ -635,7 +636,7 @@ class ServoDriveController:
 
         # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测
         elif self.current_status in ["LOADING", "UNLOADING"]:
-            correction = self.pid_correction(self.imu_yaw)
+            correction = self.pid_correction(self.imu_yaw) * rate
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]

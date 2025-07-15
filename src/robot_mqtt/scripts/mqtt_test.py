@@ -6,7 +6,7 @@ import rospy
 from std_msgs.msg import String
 
 class MQTTClient:
-    def __init__(self, broker, port, topic_status, topic_cmd, client_id, ca_cert=None):
+    def __init__(self, broker, port, user, passward, topic_status, topic_cmd, client_id, ca_cert=None):
         """
         Initialize MQTT Client
         
@@ -19,6 +19,8 @@ class MQTTClient:
         """
         self.broker = broker
         self.port = port
+        self.user = user
+        self.passward = passward
         self.topic_status = topic_status  # ROS状态发布到MQTT
         self.topic_cmd = topic_cmd        # MQTT控制指令下发到ROS
         self.client_id = client_id
@@ -91,6 +93,9 @@ class MQTTClient:
         print(f"\n⏳ 连接到MQTT服务器: {self.broker}:{self.port} (TLS加密)...")
         
         try:
+            # 设置用户名和密码
+            self.client.username_pw_set(self.user, self.passward)
+        
             self.client.connect(self.broker, self.port, keepalive)
             print(f"✅ 连接成功!")
             print(f"  ├─ 客户端ID: {self.client_id}")
@@ -137,8 +142,12 @@ class MQTTClient:
 if __name__ == "__main__":
     # Configuration
     config = {
-        "broker": "129.211.16.114",
+        # "broker": "129.211.16.114",
+        # "port": 8883,               
+        "broker": "121.40.57.48",
         "port": 8883,
+        "user": "gf-mounted",
+        "passward": "20230810",
         "topic_status": "robot/status",  # ROS状态发布到MQTT
         "topic_cmd": "robot/cmd",        # MQTT控制指令下发到ROS
         "client_id": "python-mqtt-client-v2",
