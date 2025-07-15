@@ -167,7 +167,7 @@ class ServoDriveController:
         self.set_position_mode(motor_id)
         
         # 2. 设置目标位置
-        self.set_position_pluse(motor_id, position)
+        self.set_position_pulse(motor_id, position)
         
         # 3. 设置为绝对位置立即生效模式并启用
         self.position_mode_enable(motor_id)
@@ -177,23 +177,23 @@ class ServoDriveController:
     def set_position_mode(self, motor_id):# 0x03>>0x01 ， 位置模式
         self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00])
         
-    def set_position_pluse(self, motor_id, pluse):
+    def set_position_pulse(self, motor_id, pulse):
         data = [
             0x23, 0x7A, 0x60, 0x00,
-            pluse & 0xFF,
-            (pluse >> 8) & 0xFF,
-            (pluse >> 16) & 0xFF,
-            (pluse >> 24) & 0xFF
+            pulse & 0xFF,
+            (pulse >> 8) & 0xFF,
+            (pulse >> 16) & 0xFF,
+            (pulse >> 24) & 0xFF
         ]
-        # print(f"设置电机 {motor_id} 目标速度: {pluse} RPM")
+        # print(f"设置电机 {motor_id} 目标速度: {pulse} RPM")
         self.send_command(motor_id, data)
-    def set_velocoty_pluse(self, motor_id, pluse):
+    def set_velocoty_pulse(self, motor_id, pulse):
         data = [
             0x23, 0x81, 0x60, 0x00,
-            pluse & 0xFF,
-            (pluse >> 8) & 0xFF,
-            (pluse >> 16) & 0xFF,
-            (pluse >> 24) & 0xFF
+            pulse & 0xFF,
+            (pulse >> 8) & 0xFF,
+            (pulse >> 16) & 0xFF,
+            (pulse >> 24) & 0xFF
         ]
         self.send_command(motor_id, data)
     
@@ -406,7 +406,7 @@ class ServoDriveController:
                 #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
                 self.set_state("FORWARD")
 
-        # 进出仓状态并设置执行动作
+        # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测
         if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
             if msg.distance_a > 250 and msg.distance_c > 250:
                 self.set_state("STOP")
@@ -614,8 +614,8 @@ class ServoDriveController:
         #         target_right = 0
         # # 只在切换目标时下发一次目标指令
         #     if not self.target_sent_flag:
-        #         self.set_velocoty_pluse(2, config["velocity_low"])
-        #         self.set_velocoty_pluse(3, config["velocity_up"])
+        #         self.set_velocoty_pulse(2, config["velocity_low"])
+        #         self.set_velocoty_pulse(3, config["velocity_up"])
         #         self.enter_absolute_position_mode(2, target_left)
         #         self.enter_absolute_position_mode(3, target_right)
         #         self.target_sent_flag = True
@@ -642,6 +642,12 @@ class ServoDriveController:
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             # 通过上下双传感器检测是否到位,哪边到位哪边停，直到两边均到位
+            # 设置UNLOADING到BACKWARD以实现自动运行程序第一步。
+            if self.current_status == "UNLOADING":
+                #到位检测判断
+                # self.set_state("BACKWARD")
+                pass
+
             self.side_detected = True
             # 左右轮速度矫正（左轮-修正，右轮+修正）
             if (self.last_left_speed != left_speed or
@@ -662,8 +668,8 @@ class ServoDriveController:
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
             # # 设置移动速度（只需每次切换目标时设置一次即可）
-            # self.set_velocoty_pluse(2, config["velocity_low"])
-            # self.set_velocoty_pluse(3, config["velocity_up"])
+            # self.set_velocoty_pulse(2, config["velocity_low"])
+            # self.set_velocoty_pulse(3, config["velocity_up"])
 
             # # 判断是否到达目标（允许一定误差）
             # if (abs(self.left_position - target_left) < 1000 and
