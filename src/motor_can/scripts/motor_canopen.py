@@ -121,7 +121,7 @@ class ServoDriveController:
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
         self.is_upstop = False
         self.is_lowstop = False
-        self.auto_mode = True #默认开启自动模式
+        self.auto_mode = False #默认关闭自动模式
         #控制不同状态下的发布频率,初始化默认为一秒2次
         self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
         
@@ -383,7 +383,7 @@ class ServoDriveController:
         }
         if key in key_mapping:
             self.set_state(key_mapping[key])
-            self.auto_mode = (key == 'a')
+            # self.auto_mode = (key == 'a')
         else:
             rospy.loginfo(f"无效按键: {key}")
 
@@ -422,12 +422,18 @@ class ServoDriveController:
         else: # 手动模式，仅在前进与后退中切换，未触发
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
+                    self.set_target_velocity(3, 0)
+                    self.set_target_velocity(2, 0)
+                    time.sleep(1)
                     self.set_state("BACKWARD")
                     # self.set_state("STOP")
                     # time.sleep(1)
 
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.distance_b > 250):
+                    self.set_target_velocity(3, 0)
+                    self.set_target_velocity(2, 0)
+                    time.sleep(1)
                     self.set_state("FORWARD")
         # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均 < 250 再切换下个状态。
         if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
