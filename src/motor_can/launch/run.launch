@@ -1,15 +1,15 @@
 <launch>
+<!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
+<arg name="robot_ID" default="001" />
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
-        <!-- <param name="servo_config" value="$(find motor_can)/config/servo_config.yaml"/> -->
-        <!-- <param name="can_interface" value="can0"/> -->
     </node>
     <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
         <param name="broker" value="121.40.57.48"/>
         <param name="port" value="8883"/>
         <param name="user" value="gf-mounted"/>
         <param name="passward" value="20230810"/>
-        <param name="topic_status" value="robot/001/status"/>
-        <param name="topic_cmd" value="robot/001/cmd"/>
+        <param name="topic_status" value="robot/$(arg robot_ID)/status"/>
+        <param name="topic_cmd" value="robot/$(arg robot_ID)/cmd"/>
         <param name="client_id" value="python-mqtt-client-v2"/>
     </node>
     <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen">
