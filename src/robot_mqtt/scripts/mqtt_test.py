@@ -148,8 +148,8 @@ if __name__ == "__main__":
         "port": 8883,
         "user": "gf-mounted",
         "passward": "20230810",
-        "topic_status": "robot/status",  # ROS状态发布到MQTT
-        "topic_cmd": "robot/cmd",        # MQTT控制指令下发到ROS
+        "topic_status": "robot/001/status",  # ROS状态发布到MQTT
+        "topic_cmd": "robot/001/cmd",        # MQTT控制指令下发到ROS
         "client_id": "python-mqtt-client-v2",
         "ca_cert": None
     }
