@@ -152,12 +152,13 @@ class ServoDriveController:
             self.complete_state = False
             self.enable_drive_flag = True
 
-        # STOP时降低发布频率为半小时一次（30min*60=1800秒）    
+        # STOP时3秒后，降低发布频率为半小时一次（30min*60=1800秒）    
         if new_state == "STOP":
             # self.update_publish_timer()
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
+            threading.Thread(target=self.delayed_publish_freq_switch,args=(3,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
@@ -256,7 +257,17 @@ class ServoDriveController:
 
     def status_callback(self, msg):
         """处理状态消息"""
-        self.set_state(msg.data)
+        try:
+            cmd_obj = json.loads(msg.data)
+            command = cmd_obj.get("command", None)
+            if command:
+                # print("cmd:", command)
+                self.set_state(command)  
+            else:
+                rospy.logwarn(f"未找到command字段: {msg.data}")
+        except Exception as e:
+            rospy.logwarn(f"消息解析失败，尝试按字符串处理: {msg.data}, 错误: {e}")
+            self.set_state(msg.data)
 
     def imu_callback(self, msg):
         """处理IMU数据"""
@@ -728,6 +739,17 @@ class ServoDriveController:
             # self.current_velocity_brush = brush_speed
             # self.current_velocity_low = 0
             # self.current_velocity_up = 0
+
+    
+    def delayed_publish_freq_switch(self, delay_sec=3):
+        # 延时后切换到低频率
+        time.sleep(delay_sec)
+        if self.current_status == "STOP":
+            if self.publish_timer is not None:
+                self.publish_timer.shutdown()
+            self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
+
+        
     @staticmethod
     def keyboard_listener(controller):
         rospy.loginfo("按键控制：s=停止, f=前进, b=后退")

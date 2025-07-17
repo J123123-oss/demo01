@@ -4,6 +4,7 @@ import paho.mqtt.client as mqtt
 import time
 import rospy
 from std_msgs.msg import String
+import json
 
 class MQTTClient:
     def __init__(self, broker, port, user, passward, topic_status, topic_cmd, client_id, ca_cert=None):
@@ -66,9 +67,23 @@ class MQTTClient:
         """Message received callback"""
         print(f"\n[收到消息] \n  ├─ 主题: {msg.topic}\n  ├─ QoS: {msg.qos}\n  └─ 内容: {msg.payload.decode()}")
         # 只处理控制指令主题
+        # if msg.topic == self.topic_cmd and self.ros_cmd_pub:
+            # 发布str消息
+            # ros_msg = String()
+            # ros_msg.data = msg.payload.decode()
+
         if msg.topic == self.topic_cmd and self.ros_cmd_pub:
             ros_msg = String()
-            ros_msg.data = msg.payload.decode()
+            # 假设收到的内容已经是 JSON 格式
+            try:
+                # 先解析验证是否是有效的 JSON
+                cmd_obj = json.loads(msg.payload.decode())
+                # 然后重新序列化确保格式正确
+                ros_msg.data = json.dumps(cmd_obj)
+            except json.JSONDecodeError:
+                # 如果不是 JSON，按原样传递
+                ros_msg.data = msg.payload.decode()
+                
             self.ros_cmd_pub.publish(ros_msg)
             print(f"[MQTT->ROS] 已发布到 /robot_cmd: {ros_msg.data}")
 
@@ -142,15 +157,15 @@ class MQTTClient:
 if __name__ == "__main__":
     # Configuration
     config = {
-        # "broker": "129.211.16.114",
+        # "broker": "129.211.16.114",   Old
         # "port": 8883,               
-        "broker": "121.40.57.48",
-        "port": 8883,
-        "user": "gf-mounted",
-        "passward": "20230810",
-        "topic_status": "robot/001/status",  # ROS状态发布到MQTT
-        "topic_cmd": "robot/001/cmd",        # MQTT控制指令下发到ROS
-        "client_id": "python-mqtt-client-v2",
+        "broker": rospy.get_param("~broker", "121.40.57.48"),
+        "port": rospy.get_param("~port", 8883),
+        "user": rospy.get_param("~user", "gf-mounted"),
+        "passward": rospy.get_param("~passward", "20230810"),
+        "topic_status": rospy.get_param("~topic_status", "robot/001/status"),
+        "topic_cmd": rospy.get_param("~topic_cmd", "robot/001/cmd"),
+        "client_id": rospy.get_param("~client_id", "python-mqtt-client-v2"),
         "ca_cert": None
     }
     
