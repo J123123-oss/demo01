@@ -16,8 +16,8 @@ import select
 rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    def __init__(self, channel='vcan0', interface='socketcan'):
-    # def __init__(self, channel='can0', interface='socketcan'):
+    # def __init__(self, channel='vcan0', interface='socketcan'):
+    def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         self.last_left_speed = 0
         self.last_right_speed = 0
@@ -78,8 +78,13 @@ class ServoDriveController:
                 "velocity_up": 0,
                 "velocity_low": 0,
                 "velocity_brush": 0
+            },
+            "ROLLER_ACCEL":{
+                #目前用与自动模式与手动模式的切换
+            },
+            "ROLLER_DECEL":{
+                #目前用于清空自动模式的状态
             }
-
             # "FORWARD": {  # 测试电机功耗前进状态
             #     #下发100到电机减速20：1，实际为5RPM ，发250最终12.5RPM，速度0.078m/s
             #     "velocity_up": 637 * rate,   #实际速度0.2m/s
@@ -117,11 +122,13 @@ class ServoDriveController:
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
         self.complete_state = False
-        self.side_detected = False
+        self.side_detected = False  #进出仓时超声波检测边缘标志
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
         self.is_upstop = False
         self.is_lowstop = False
-        self.auto_mode = True #默认开启自动模式
+        self.auto_mode = True #默认自动模式
+        self.auto_step = None # 当前自动程序所在状态
+        self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒2次
         self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
         
@@ -141,20 +148,30 @@ class ServoDriveController:
         if new_state not in self.status_config:
             rospy.logwarn(f"尝试设置无效状态: {new_state}")
             return False
-        if new_state == self.current_status:
+        if new_state == self.current_status and new_state != "ROLLER_ACCEL":
             return False  # 状态未改变
         # 检查是否从START切换到其他模式
         # if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
         #     self.need_speed_mode_init = True
-
-        # 初始化为速度模式
+        # 自动模式记录当前状态，UPSTOP与LOWSTOP待确认
+        if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
+            self.auto_step = new_state
+            print("auto_step:",self.auto_step)
+        # 初始化为速度模式，添加恢复状态
         if new_state == "START":
             self.complete_state = False
             self.enable_drive_flag = True
+            # self.auto_mode = True # 手动设置其他状态应关闭自动
+            # 自动模式下恢复未完成动作
+            # if self.auto_mode and self.auto_step:
+            #     rospy.loginfo(f"恢复自动流程，继续执行: {self.auto_step}")
+            #     # 延迟一点时间，确保初始化完成
+            #     threading.Timer(3.0, lambda: self.set_state(self.auto_step)).start()
+            #     return True
 
         # STOP时3秒后，降低发布频率为半小时一次（30min*60=1800秒）    
         if new_state == "STOP":
-            # self.update_publish_timer()
+            # self.auto_mode = False
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
@@ -168,7 +185,16 @@ class ServoDriveController:
             self.prev_motion_state = self.last_state
         elif new_state == "LOWSTOP":
             self.prev_motion_state = self.last_state
-
+        elif new_state == "ROLLER_DECEL":#清空自动模式下记忆的状态
+            self.auto_step = None
+        elif new_state == "ROLLER_ACCEL": #切换手动与自动模式
+            if( self.count % 2 ):
+                self.auto_mode = False
+                print("手动模式开")
+            else:    
+                self.auto_mode = True
+                print("自动模式开")
+            self.count += 1
         self.current_status = new_state
         self.last_state = self.current_status
         rospy.loginfo(f"状态已更新为: {self.current_status}")
@@ -368,8 +394,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -393,8 +419,12 @@ class ServoDriveController:
             '2': "LOWSTOP"
         }
         if key in key_mapping:
+            if key != 'a':
+                self.auto_mode = False
+            else:
+                self.auto_mode = True
             self.set_state(key_mapping[key])
-            self.auto_mode = (key == 'a')
+            # self.auto_mode = (key == 'a')
         else:
             rospy.loginfo(f"无效按键: {key}")
 
@@ -417,7 +447,7 @@ class ServoDriveController:
         else:
             self.sensors_status &= ~0x08
         # 前进边缘检测
-        if self.auto_mode:
+        if self.auto_mode: # 自动模式未开启，待完善
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
                     # self.set_state("STOP")
@@ -430,7 +460,7 @@ class ServoDriveController:
                     # time.sleep(1)
                     #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
                     self.set_state("FORWARD")
-        else: # 手动模式，仅在前进与后退中切换，未触发
+        else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
                     self.set_state("BACKWARD")
@@ -447,7 +477,9 @@ class ServoDriveController:
                 self.set_state("STOP")
                 self.side_detected = False
                 time.sleep(1)
+                #清空自动流程状态
                 self.complete_state = True
+                self.auto_step = None
             elif (msg.distance_a > 250 and msg.distance_c < 250):
                 self.set_state("LOWSTOP")
                 #确保停到位
@@ -462,10 +494,10 @@ class ServoDriveController:
                 self.complete_state = False
 
             # 发布两侧边缘到位的完成消息
-        if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
-            if (msg.distance_a > 250):
-                self.set_state("STOP")
-                time.sleep(1)
+        # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
+        #     if (msg.distance_a > 250):
+        #         self.set_state("STOP")
+        #         time.sleep(1)
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -510,6 +542,11 @@ class ServoDriveController:
                     rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
             self.enable_drive_flag = False
             rospy.loginfo("速度模式初始化完成")
+            # 初始化完成后自动切换到auto_step
+            if self.auto_mode and self.auto_step:
+                rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
+                self.set_state(self.auto_step)
+            return
 
         # 2. FORWARD/BACKWARD状态：IMU矫正+ 单侧停止
         if self.current_status in ["FORWARD", "BACKWARD"]:
@@ -517,7 +554,7 @@ class ServoDriveController:
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+            # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -613,6 +650,7 @@ class ServoDriveController:
                 self.set_target_velocity(2, 0)
                 self.set_target_velocity(3, 0)
                 self.set_target_velocity(4, 0)
+                # 停止使能电机，下次需使能
                 self.disable_drive(2)
                 self.disable_drive(3)
                 self.disable_drive(4)
@@ -675,7 +713,7 @@ class ServoDriveController:
             left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+            # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             # 通过上下双传感器检测是否到位,哪边到位哪边停，直到两边均到位
             # 设置UNLOADING到BACKWARD以实现自动运行程序第一步。
             # if self.current_status == "UNLOADING":#自动模式
