@@ -498,6 +498,11 @@ class ServoDriveController:
         #     if (msg.distance_a > 250):
         #         self.set_state("STOP")
         #         time.sleep(1)
+        if self.current_status == "UNLOADING":#自动模式
+            # 到达板子上
+            if (msg.distance_a < 150):
+                self.set_state("BACKWARD")
+                
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
