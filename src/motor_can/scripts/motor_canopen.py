@@ -275,7 +275,9 @@ class ServoDriveController:
             "velocity_brush": self.current_velocity_brush / rate,
             "imu_yaw": self.imu_yaw,  # IMU偏航角
             "sensors_status": self.sensors_status,  # 超声波传感器状态
-            "complete_state":self.complete_state,
+            "complete_state":self.complete_state, # 任务完成状态
+            "auto_mode": self.auto_mode, # 自动模式开关,默认开
+            # "auto_step": self.auto_step, # 当前自动程序所在状态
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
 
         }
@@ -502,7 +504,7 @@ class ServoDriveController:
             # 到达板子上
             if (msg.distance_a < 150):
                 self.set_state("BACKWARD")
-                
+
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
