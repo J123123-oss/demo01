@@ -548,7 +548,8 @@ class ServoDriveController:
             correction = 0  # 在小范围内不进行调整
 
         self.pid_last_error = error
-        return correction if self.current_status in ["FORWARD","LOADING"] else -correction
+        return correction
+        # return correction if self.current_status in ["FORWARD","LOADING"] else -correction
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
