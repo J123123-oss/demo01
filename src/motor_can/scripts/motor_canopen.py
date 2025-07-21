@@ -587,7 +587,7 @@ class ServoDriveController:
         # 2. FORWARD/BACKWARD状态：IMU矫正+ 单侧停止
         if self.current_status in ["FORWARD", "BACKWARD"]:
             correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
@@ -746,7 +746,7 @@ class ServoDriveController:
         # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测
         elif self.current_status in ["LOADING", "UNLOADING"]:
             correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
