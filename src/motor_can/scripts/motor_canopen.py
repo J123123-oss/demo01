@@ -126,7 +126,7 @@ class ServoDriveController:
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
         self.is_upstop = False
         self.is_lowstop = False
-        self.auto_mode = True #默认自动模式
+        self.auto_mode = False #默认自动模式
         self.auto_step = None # 当前自动程序所在状态
         self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒2次
@@ -519,7 +519,7 @@ class ServoDriveController:
             correction = 0  # 在小范围内不进行调整
 
         self.pid_last_error = error
-        return correction
+        return correction if self.current_status == "FORWARD" else -correction
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
