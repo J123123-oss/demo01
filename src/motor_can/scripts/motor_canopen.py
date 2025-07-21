@@ -481,8 +481,11 @@ class ServoDriveController:
                 if (msg.distance_a > 250):
                     self.counter_a += 1
                     print("counter_a:",self.counter_a)
+                    # print("time1:",rospy.get_time())
                     if self.counter_a >= self.threshold:
                         self.set_state("BACKWARD")
+                    # print(">>>>>>>>time2:",rospy.get_time())
+
                     # self.set_state("STOP")
                     # time.sleep(1)
                 else:
@@ -491,8 +494,11 @@ class ServoDriveController:
                 if (msg.distance_b > 250):
                     self.counter_b += 1
                     print("counter_b:",self.counter_b)
+                    # print("time3:",rospy.get_time())
                     if self.counter_b >= self.threshold:
                         self.set_state("FORWARD")
+                        # print(">>>>>>>>time4:",rospy.get_time())
+
                 else:
                     self.counter_b = 0
         # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均 < 250 再切换下个状态。
