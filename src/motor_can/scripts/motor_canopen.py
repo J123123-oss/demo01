@@ -102,12 +102,6 @@ class ServoDriveController:
         self.current_velocity_up = 0   # ID = 3
         self.current_velocity_low = 0  # ID = 2
         self.current_velocity_brush = 0  # ID = 4
-        #统计超声波传感器触发次数
-        self.counter_a =0
-        self.counter_b =0
-        self.counter_c =0
-        self.counter_d =0
-        self.threshold = 15 #规定检测超过阈值的次数
 
         self.stop_flag = False   
         self.position_engaged = False           # 标记位置模式是否已激活
@@ -458,41 +452,26 @@ class ServoDriveController:
         if self.auto_mode: # 自动模式未开启，待完善
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
-                    self.counter_a += 1
-                    if self.counter_a >= self.threshold:
-                        # self.set_state("STOP")
-                        # time.sleep(1)
-                        self.set_state("LOADING")
-                else:
-                    self.counter_a = 0
+                    # self.set_state("STOP")
+                    # time.sleep(1)
+                    self.set_state("LOADING")
 
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.distance_b > 250):
-                    self.counter_b += 1
-                    if self.counter_b >= self.threshold:
-                        # self.set_state("STOP")
-                        # time.sleep(1)
-                        #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
-                        self.set_state("FORWARD")
-                else:
-                    self.counter_b = 0
+                    # self.set_state("STOP")
+                    # time.sleep(1)
+                    #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
+                    self.set_state("FORWARD")
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
-                    self.counter_a += 1
-                    if self.counter_a >= self.threshold:
-                        self.set_state("BACKWARD")
+                    self.set_state("BACKWARD")
                     # self.set_state("STOP")
                     # time.sleep(1)
-                else:
-                    msg.counter_a = 0
+
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.distance_b > 250):
-                    self.counter_b += 1
-                    if self.counter_b >= self.threshold:
-                        self.set_state("FORWARD")
-                else:
-                    self.counter_b = 0
+                    self.set_state("FORWARD")
         # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均 < 250 再切换下个状态。
         if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
         # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
@@ -540,7 +519,7 @@ class ServoDriveController:
             correction = 0  # 在小范围内不进行调整
 
         self.pid_last_error = error
-        return correction if self.current_status in ["FORWARD","LOADING"] else -correction
+        return correction if self.current_status in["FORWARD", "LOADING"] else -correction
     
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
@@ -579,7 +558,7 @@ class ServoDriveController:
         # 2. FORWARD/BACKWARD状态：IMU矫正+ 单侧停止
         if self.current_status in ["FORWARD", "BACKWARD"]:
             correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
@@ -738,7 +717,7 @@ class ServoDriveController:
         # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测
         elif self.current_status in ["LOADING", "UNLOADING"]:
             correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] - correction)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")

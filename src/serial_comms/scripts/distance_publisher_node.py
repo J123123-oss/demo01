@@ -16,7 +16,7 @@ def main():
     # These can be set in a launch file or via the command line
     port = rospy.get_param('~port', '/dev/SENSOR0')
     baudrate = rospy.get_param('~baudrate', 115200) # Common baudrate, adjust if needed
-    rate = rospy.Rate(10)  # 10Hz
+    # rate = rospy.Rate(10)  # 10Hz
     # Create a publisher for the custom Distances message
     pub = rospy.Publisher('distance_data', Distances, queue_size=10)
 
@@ -69,7 +69,7 @@ def main():
                 
                 pub.publish(msg)
                 rospy.logdebug("Published distances: %s", parsed_data)
-                rate.sleep()
+                # rate.sleep()
             else:
                 rospy.logwarn("Incomplete data packet received. Missing keys.")
 
