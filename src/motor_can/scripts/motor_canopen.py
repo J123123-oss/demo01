@@ -107,7 +107,7 @@ class ServoDriveController:
         self.counter_b =0
         self.counter_c =0
         self.counter_d =0
-        self.threshold = 15 #规定检测超过阈值的次数
+        self.threshold = 30 #规定检测超过阈值的次数
 
         self.stop_flag = False   
         self.position_engaged = False           # 标记位置模式是否已激活
@@ -480,15 +480,17 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
                     self.counter_a += 1
+                    print("counter_a:",self.counter_a)
                     if self.counter_a >= self.threshold:
                         self.set_state("BACKWARD")
                     # self.set_state("STOP")
                     # time.sleep(1)
                 else:
-                    msg.counter_a = 0
+                    self.counter_a = 0
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.distance_b > 250):
                     self.counter_b += 1
+                    print("counter_b:",self.counter_b)
                     if self.counter_b >= self.threshold:
                         self.set_state("FORWARD")
                 else:
