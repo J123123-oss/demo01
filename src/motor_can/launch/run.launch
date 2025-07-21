@@ -10,7 +10,7 @@
         <param name="passward" value="20230810"/>
         <param name="topic_status" value="robot/$(arg robot_ID)/status"/>
         <param name="topic_cmd" value="robot/$(arg robot_ID)/cmd"/>
-        <param name="client_id" value="python-mqtt-client-v2"/>
+        <param name="client_id" value="python-mqtt-client-$(arg robot_ID)"/>
     </node>
     <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen">
         <!-- <param name="port" value="/dev/SENSOR0"/> -->

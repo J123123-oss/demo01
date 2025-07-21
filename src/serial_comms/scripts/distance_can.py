@@ -52,7 +52,7 @@ class UltrasonicDistanceNode:
     def run(self):
         while not rospy.is_shutdown():
             try:
-                # 接收CAN消息 (超时0.1秒)
+                # 接收CAN消息 (超时0.5秒)
                 msg = self.bus.recv(timeout=0.5)
                 
                 if msg is not None:
