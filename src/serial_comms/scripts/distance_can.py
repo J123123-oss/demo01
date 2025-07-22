@@ -19,7 +19,7 @@ class UltrasonicDistanceNode:
         self.setup_can_bus()
         
         # 设置发布频率
-        self.rate = rospy.Rate(10)  # 10Hz
+        # self.rate = rospy.Rate(10)  # 10Hz
         
     def setup_can_bus(self):
         # 配置CAN总线 (1M波特率)
@@ -61,7 +61,7 @@ class UltrasonicDistanceNode:
                     self.pub.publish(self.distance_msg)
                     rospy.logdebug("发布距离数据: %s", self.distance_msg)
                 
-                self.rate.sleep()
+                # self.rate.sleep()
                 
             except can.CanError as e:
                 rospy.logwarn(f"CAN通信错误: {e}")
