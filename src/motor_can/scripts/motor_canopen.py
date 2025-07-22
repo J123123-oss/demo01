@@ -2,11 +2,13 @@
 # -*- coding: utf-8 -*-
 import can
 import time
+import datetime
 import yaml
 import rospy
 import json
 from std_msgs.msg import String
 from serial_comms.msg import Distances
+from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
 import threading
 import sys
@@ -128,7 +130,6 @@ class ServoDriveController:
 
         self.sensors_status = 0 #表示4个超声波传感器触发状态
         self.complete_state = False
-        self.side_detected = False  #进出仓时超声波检测边缘标志
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
         self.is_upstop = False
         self.is_lowstop = False
@@ -436,104 +437,166 @@ class ServoDriveController:
         else:
             rospy.loginfo(f"无效按键: {key}")
 
-    def distance_callback(self, msg):
+    # def distance_callback(self, msg):
+    #     """超声波距离检测回调"""
+    #     if msg.distance_a < 250:
+    #         self.sensors_status |= 0x01  # 设置传感器A状态
+    #     else:
+    #         self.sensors_status &= ~0x01
+    #     if msg.distance_b < 250:
+    #         self.sensors_status |= 0x02
+    #     else:
+    #         self.sensors_status &= ~0x02
+    #     if msg.distance_c < 250:
+    #         self.sensors_status |= 0x04
+    #     else:
+    #         self.sensors_status &= ~0x04
+    #     if msg.distance_d < 250:
+    #         self.sensors_status |= 0x08
+    #     else:
+    #         self.sensors_status &= ~0x08
+    #     # 前进边缘检测
+    #     if self.auto_mode: # 自动模式未开启，待完善
+    #         if self.current_status == self.status_list[1]:  # FORWARD
+    #             if (msg.distance_a > 250):
+    #                 self.counter_a += 1
+    #                 if self.counter_a >= self.threshold:
+    #                     # self.set_state("STOP")
+    #                     # time.sleep(1)
+    #                     self.set_state("LOADING")
+    #             else:
+    #                 self.counter_a = 0
+
+    #         if self.current_status == self.status_list[2]:  # BACKWARD
+    #             if (msg.distance_b > 250):
+    #                 self.counter_b += 1
+    #                 if self.counter_b >= self.threshold:
+    #                     # self.set_state("STOP")
+    #                     # time.sleep(1)
+    #                     #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
+    #                     self.set_state("FORWARD")
+    #             else:
+    #                 self.counter_b = 0
+    #     else: # 手动模式，仅在前进与后退中切换
+    #         if self.current_status == self.status_list[1]:  # FORWARD
+    #             if (msg.distance_a > 250):
+    #                 self.counter_a += 1
+    #                 rospy.loginfo(f"counter_a: {self.counter_a}")
+    #                 rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+    #                 if self.counter_a >= self.threshold:
+    #                     self.set_state("BACKWARD")
+    #                     rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+
+    #             else:
+    #                 self.counter_a = 0
+    #         if self.current_status == self.status_list[2]:  # BACKWARD
+    #             if (msg.distance_b > 250):
+    #                 self.counter_b += 1
+    #                 rospy.loginfo(f"counter_b: {self.counter_b}")
+    #                 rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+    #                 if self.counter_b >= self.threshold:
+    #                     self.set_state("FORWARD")
+    #                     rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+
+    #             else:
+    #                 self.counter_b = 0
+    #     # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均 < 250 再切换下个状态。
+    #     if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
+    #     # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
+    #         if msg.distance_a > 250 and msg.distance_c > 250:
+    #             self.set_state("STOP")
+    #             self.side_detected = False
+    #             time.sleep(1)
+    #             #清空自动流程状态
+    #             self.complete_state = True
+    #             self.auto_step = None
+    #         elif (msg.distance_a > 250 and msg.distance_c < 250):
+    #             self.set_state("LOWSTOP")
+    #             #确保停到位
+    #             time.sleep(2)
+    #             self.set_state("STOP")
+    #             self.complete_state = False
+
+    #         elif (msg.distance_c > 250 and msg.distance_a < 250):
+    #             self.set_state("UPSTOP")
+    #             time.sleep(2)
+    #             self.set_state("STOP")
+    #             self.complete_state = False
+
+        #     # 发布两侧边缘到位的完成消息
+        # # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
+        # #     if (msg.distance_a > 250):
+        # #         self.set_state("STOP")
+        # #         time.sleep(1)
+        # if self.current_status == "UNLOADING":#自动模式
+        #     # 到达板子上
+        #     if (msg.distance_a < 150):
+        #         self.set_state("BACKWARD")
+    def proximity_callback(self, msg):
         """超声波距离检测回调"""
-        if msg.distance_a < 250:
+        if msg.sensor_a:
             self.sensors_status |= 0x01  # 设置传感器A状态
         else:
             self.sensors_status &= ~0x01
-        if msg.distance_b < 250:
+        if msg.sensor_b:
             self.sensors_status |= 0x02
         else:
             self.sensors_status &= ~0x02
-        if msg.distance_c < 250:
+        if msg.sensor_c:
             self.sensors_status |= 0x04
         else:
             self.sensors_status &= ~0x04
-        if msg.distance_d < 250:
+        if msg.sensor_d:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
-        # 前进边缘检测
-        if self.auto_mode: # 自动模式未开启，待完善
+        # 自动与手动模式下的检测
+        if self.auto_mode: # 自动模式未开启，待完善：第一步UNLOADING or BACKWARD ？
             if self.current_status == self.status_list[1]:  # FORWARD
-                if (msg.distance_a > 250):
-                    self.counter_a += 1
-                    if self.counter_a >= self.threshold:
-                        # self.set_state("STOP")
-                        # time.sleep(1)
-                        self.set_state("LOADING")
-                else:
-                    self.counter_a = 0
+                if (msg.sensor_a or msg.sensor_c):
+                    self.set_state("STOP")
 
             if self.current_status == self.status_list[2]:  # BACKWARD
-                if (msg.distance_b > 250):
-                    self.counter_b += 1
-                    if self.counter_b >= self.threshold:
-                        # self.set_state("STOP")
-                        # time.sleep(1)
-                        #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
-                        self.set_state("FORWARD")
-                else:
-                    self.counter_b = 0
+                if (msg.sensor_b or msg.sensor_d):
+                    #自动程序：第一步检测接近开关到位>后退>到边缘自动切换前进>直到进仓>发布完成消息>STOP停止使能。
+                    self.set_state("FORWARD")
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
-                if (msg.distance_a > 250):
-                    self.counter_a += 1
-                    rospy.loginfo(f"counter_a: {self.counter_a}")
-                    # print("time1:",rospy.get_time())
-                    if self.counter_a >= self.threshold:
-                        self.set_state("BACKWARD")
-                    # print(">>>>>>>>time2:",rospy.get_time())
-
-                    # self.set_state("STOP")
-                    # time.sleep(1)
-                else:
-                    self.counter_a = 0
+                if (msg.sensor_a): # 无仓时不可用
+                    rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+                    self.set_state("BACKWARD")
+                    rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
             if self.current_status == self.status_list[2]:  # BACKWARD
-                if (msg.distance_b > 250):
-                    self.counter_b += 1
-                    rospy.loginfo(f"counter_b: {self.counter_b}")
-                    # print("time3:",rospy.get_time())
-                    if self.counter_b >= self.threshold:
-                        self.set_state("FORWARD")
-                        # print(">>>>>>>>time4:",rospy.get_time())
-
-                else:
-                    self.counter_b = 0
-        # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均 < 250 再切换下个状态。
-        if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
+                if (msg.sensor_b):
+                    rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+                    self.set_state("FORWARD")
+                    rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+        # 进仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均到位再切换下个状态。
+        if self.current_status == self.status_list[4]:  # LOADING
         # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
-            if msg.distance_a > 250 and msg.distance_c > 250:
+            if msg.sensor_a and msg.sensor_c:
                 self.set_state("STOP")
-                self.side_detected = False
                 time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
                 self.auto_step = None
-            elif (msg.distance_a > 250 and msg.distance_c < 250):
+            elif (msg.sensor_a and not msg.sensor_c):
                 self.set_state("LOWSTOP")
                 #确保停到位
                 time.sleep(2)
                 self.set_state("STOP")
                 self.complete_state = False
 
-            elif (msg.distance_c > 250 and msg.distance_a < 250):
+            elif (msg.sensor_c and not msg.sensor_a):
                 self.set_state("UPSTOP")
                 time.sleep(2)
                 self.set_state("STOP")
                 self.complete_state = False
 
-            # 发布两侧边缘到位的完成消息
-        # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
-        #     if (msg.distance_a > 250):
-        #         self.set_state("STOP")
-        #         time.sleep(1)
-        if self.current_status == "UNLOADING":#自动模式
-            # 到达板子上
-            if (msg.distance_a < 150):
+        if self.current_status == self.status_list[5]: #自动模式
+            # 检测起始位置，进入第一步动作，有待测试
+            if (msg.sensor_a):
                 self.set_state("BACKWARD")
-
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -750,15 +813,6 @@ class ServoDriveController:
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-            # 通过上下双传感器检测是否到位,哪边到位哪边停，直到两边均到位
-            # 设置UNLOADING到BACKWARD以实现自动运行程序第一步。
-            # if self.current_status == "UNLOADING":#自动模式
-                #到位检测判断
-                # self.set_state("BACKWARD")
-
-            self.side_detected = True
-            # 左右轮速度矫正（左轮-修正，右轮+修正）
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -863,7 +917,8 @@ def main():
             rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
     rospy.loginfo("电机初始化完成（Ctrl+C 退出）")
     # 订阅速度命令话题
-    rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
+    # rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
+    rospy.Subscriber("proximity_sensor_data", String, lambda msg: controller.proximity_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
     t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
