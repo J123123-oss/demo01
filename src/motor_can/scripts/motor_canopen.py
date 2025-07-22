@@ -162,7 +162,7 @@ class ServoDriveController:
         # 自动模式记录当前状态，UPSTOP与LOWSTOP待确认
         if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
             self.auto_step = new_state
-            print("auto_step:",self.auto_step)
+            # print("auto_step:",self.auto_step)
         # 初始化为速度模式，添加恢复状态
         if new_state == "START":
             self.complete_state = False
@@ -196,10 +196,10 @@ class ServoDriveController:
         elif new_state == "ROLLER_ACCEL": #切换手动与自动模式
             if( self.count % 2 ):
                 self.auto_mode = False
-                print("手动模式开")
+                rospy.loginfo("手动模式开")
             else:    
                 self.auto_mode = True
-                print("自动模式开")
+                rospy.loginfo("自动模式开")
             self.count += 1
         self.current_status = new_state
         self.last_state = self.current_status
@@ -311,7 +311,7 @@ class ServoDriveController:
             #     self.imu_yaw -= 360
             if self.initial_yaw is None:
                 self.initial_yaw = self.imu_yaw
-                print(f"Initial IMU yaw set to: {self.initial_yaw} degrees")
+                rospy.loginfo(f"Initial IMU yaw set to: {self.initial_yaw} degrees")
             
             # 计算相对角度：将当前yaw值减去初始yaw值
             if self.initial_yaw is not None:
@@ -480,7 +480,7 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.distance_a > 250):
                     self.counter_a += 1
-                    print("counter_a:",self.counter_a)
+                    rospy.loginfo(f"counter_a: {self.counter_a}")
                     # print("time1:",rospy.get_time())
                     if self.counter_a >= self.threshold:
                         self.set_state("BACKWARD")
@@ -493,7 +493,7 @@ class ServoDriveController:
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.distance_b > 250):
                     self.counter_b += 1
-                    print("counter_b:",self.counter_b)
+                    rospy.loginfo(f"counter_b: {self.counter_b}")
                     # print("time3:",rospy.get_time())
                     if self.counter_b >= self.threshold:
                         self.set_state("FORWARD")
@@ -607,8 +607,8 @@ class ServoDriveController:
 
             if -5 < self.imu_yaw < -2:
                 # time.sleep(1.0)
-                print("last_L_speed:",self.last_left_speed)
-                print("last_R_speed:",self.last_right_speed)
+                rospy.loginfo(f"last_L_speed: {self.last_left_speed}")
+                rospy.loginfo(f"last_R_speed: {self.last_right_speed}")
                 if self.current_status == "FORWARD":
                     self.set_state("UPSTOP")
                     self.is_upstop = True
