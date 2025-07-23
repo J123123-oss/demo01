@@ -52,6 +52,7 @@ add_message_files(
   FILES
   Distances.msg
   INSPVAE.msg
+  Sensors.msg
 
   # Message2.msg
 )
