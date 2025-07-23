@@ -277,16 +277,23 @@ class ServoDriveController:
         """发布机器人状态信息，包含速度和状态"""
         state_msg = {
             "status": self.current_status,
+            "battery": 78,
+            "progress": 45,
+            "imu_yaw": self.imu_yaw,  # IMU偏航角
             "velocity_up": self.current_velocity_up / rate,  # 单位转换为RPM
             "velocity_low": self.current_velocity_low / rate,
             "velocity_brush": self.current_velocity_brush / rate,
-            "imu_yaw": self.imu_yaw,  # IMU偏航角
+            "velocity_locking": 0,
             "sensors_status": self.sensors_status,  # 超声波传感器状态
+            "device_status": {
+            "main_board": True,
+            "imu_sensor": True,
+            "motor_driver": True,
+            "comm_module": True  },
             "complete_state":self.complete_state, # 任务完成状态
             "auto_mode": self.auto_mode, # 自动模式开关,默认开
             # "auto_step": self.auto_step, # 当前自动程序所在状态
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
-
         }
         self.state_pub.publish(json.dumps(state_msg))
 
