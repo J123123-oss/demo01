@@ -704,7 +704,7 @@ class ServoDriveController:
         # 3. 单侧停止状态（UPSTOP/LOWSTOP）
         elif self.current_status in ["UPSTOP", "LOWSTOP"]:
             # 执行后退矫正
-            if not self.has_revert_flag:
+            if not self.has_reverse_flag:
                 correction = self.pid_correction(self.imu_yaw) * rate
                 right_speed = int(-self.last_right_speed + correction) # >> 两轮反向运行进行调整
                 left_speed = int(-self.last_left_speed + correction)
@@ -751,8 +751,8 @@ class ServoDriveController:
                 # 检查是否满足恢复条件
                 current_time = time.time()
                 # 条件1: 角度满足要求
-                # 条件2: 已经后退了足够时间（例如2.5秒）
-                if (-1 < self.imu_yaw < 0) and (current_time - self.reverse_start_time > 2.5):
+                # 条件2: 已经后退了足够时间（例如2.0秒）
+                if (-1 < self.imu_yaw < 0) and (current_time - self.reverse_start_time > 2.0):
                     if self.prev_motion_state:
                         self.set_state(self.prev_motion_state)
                         self.prev_motion_state = None
