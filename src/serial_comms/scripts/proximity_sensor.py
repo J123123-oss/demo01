@@ -59,13 +59,13 @@ class ModbusRTUSwitchReader:
             raise ValueError("Unexpected data length")
         
         status_bytes = response[3:6]
-        print("status_bytes:",status_bytes)
+        # print("status_bytes:",status_bytes)
         # 小端序解析：将3字节转换为整数（最低有效字节在前）
         status_value = (status_bytes[2] << 2) | (status_bytes[1] << 1) | status_bytes[0]
         
         # # 转换为6位二进制字符串（前面补零）
-        binary_str = bin(status_value)[2:].zfill(6)
-        print("Binary representation:", binary_str)  # 输出如 "000001"
+        # binary_str = bin(status_value)[2:].zfill(6)
+        # print("Binary representation:", binary_str)  # 输出如 "000001"
         
         # 解析4路开关状态（按位从低到高对应sensor_a到sensor_d）
         return {

@@ -540,7 +540,7 @@ class ServoDriveController:
         #     if (msg.distance_a < 150):
         #         self.set_state("BACKWARD")
     def proximity_callback(self, msg):
-        """超声波距离检测回调"""
+        """4路接近开关检测回调"""
         if msg.sensor_a:
             self.sensors_status |= 0x01  # 设置传感器A状态
         else:
