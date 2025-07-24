@@ -59,20 +59,21 @@ class ModbusRTUSwitchReader:
             raise ValueError("Unexpected data length")
         
         status_bytes = response[3:6]
+        # status_bytes = b'\x01\x01\x00' # b 为小端排序
         # print("status_bytes:",status_bytes)
         # 小端序解析：将3字节转换为整数（最低有效字节在前）
-        status_value = (status_bytes[2] << 2) | (status_bytes[1] << 1) | status_bytes[0]
-        
+        status_value = (status_bytes[2] << 16) | (status_bytes[1] << 8) | status_bytes[0]
+        # 00000000  00000001  00000001
         # # 转换为6位二进制字符串（前面补零）
         # binary_str = bin(status_value)[2:].zfill(6)
         # print("Binary representation:", binary_str)  # 输出如 "000001"
         
         # 解析4路开关状态（按位从低到高对应sensor_a到sensor_d）
         return {
-            'sensor_a': bool(status_value & 0b000001),
-            'sensor_b': bool(status_value & 0b000010),
-            'sensor_c': bool(status_value & 0b000100),
-            'sensor_d': bool(status_value & 0b001000)
+            'sensor_a': bool(status_value & 0b000000001), # 检测第0.0位
+            'sensor_b': bool(status_value & 0b100000000), # 检测第0.8位
+            'sensor_c': bool(status_value & 0b000000100), # 检测第0.2位
+            'sensor_d': bool(status_value & 0b000010000)  # 检测第0.4位
         }
     def timer_callback(self, event):
         try:
