@@ -24,6 +24,8 @@ class ServoDriveController:
         self.last_left_speed = 0
         self.last_right_speed = 0
         self.last_brush_speed = 0
+        self.has_reverse_flag = False
+        self.reverse_start_time = None
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态
@@ -701,54 +703,90 @@ class ServoDriveController:
 
         # 3. 单侧停止状态（UPSTOP/LOWSTOP）
         elif self.current_status in ["UPSTOP", "LOWSTOP"]:
-            correction = self.pid_correction(self.imu_yaw) * rate
-            right_speed = int(-self.last_right_speed + correction) # 右轮保持切换前速度 >> 右轮反向
-            left_speed = int(-self.last_left_speed + correction)
-            brush_speed = self.last_brush_speed
-            if (self.last_left_speed != left_speed or
-                self.last_right_speed != right_speed or
-                self.last_brush_speed != brush_speed):
+            # 执行后退矫正
+            if not self.has_revert_flag:
+                correction = self.pid_correction(self.imu_yaw) * rate
+                right_speed = int(-self.last_right_speed + correction) # >> 两轮反向运行进行调整
+                left_speed = int(-self.last_left_speed + correction)
+                brush_speed = self.last_brush_speed
+                
+                # 设置速度
                 self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
+                # 更新最后速度记录
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            # 恢复上个状态
-            if self.is_upstop and -1 < self.imu_yaw < 0:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                    self.prev_motion_state = None
-                self.is_upstop = False
-
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed
-        
-        elif self.current_status == "LOWSTOP":
-            correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(-self.last_left_speed + correction) # 左轮保持切换前速度 >> 左轮反向
-            right_speed = int (-self.last_right_speed + correction)  # 右轮保持切换前速度 >> 右轮反向
-            brush_speed = self.last_brush_speed
-            if (self.last_left_speed != left_speed or
-                self.last_right_speed != right_speed or
-                self.last_brush_speed != brush_speed):
+                
+                # 标记已执行后退
+                self.has_reverse_flag = True
+                self.reverse_start_time = time.time()  # 记录后退开始时间
+            else:
+                # 后退后执行角度校正
+                correction = self.pid_correction(self.imu_yaw) * rate
+                
+                # 使用更平滑的速度调整方式
+                if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
+                    # 根据偏差方向调整轮速
+                    right_speed = int(0.7 * self.last_right_speed + correction)  # 基础后退速度+校正
+                    left_speed = int(0.7 * self.last_left_speed + correction)
+                else:
+                    # 角度接近时减速
+                    right_speed = int(0.5 * self.last_right_speed + correction)
+                    left_speed = int(0.5 * self.last_left_speed + correction)
+                    
+                brush_speed = self.last_brush_speed
+                
+                # 设置速度
                 self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
+                
+                # 更新最后速度记录
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-
-
-            if self.is_lowstop and 0 < self.imu_yaw < 1:
-                if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                    self.prev_motion_state = None
-                self.is_lowstop = False
+                
+                # 检查是否满足恢复条件
+                current_time = time.time()
+                # 条件1: 角度满足要求
+                # 条件2: 已经后退了足够时间（例如2.5秒）
+                if (-1 < self.imu_yaw < 0) and (current_time - self.reverse_start_time > 2.5):
+                    if self.prev_motion_state:
+                        self.set_state(self.prev_motion_state)
+                        self.prev_motion_state = None
+                    self.is_upstop = False
+                    self.has_reversed_in_upstop = False  # 重置标志位
+            
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
+               
+        # elif self.current_status == "LOWSTOP":
+        #     correction = self.pid_correction(self.imu_yaw) * rate
+        #     left_speed = int(-self.last_left_speed + correction) # 左轮保持切换前速度 >> 左轮反向
+        #     right_speed = int (-self.last_right_speed + correction)  # 右轮保持切换前速度 >> 右轮反向
+        #     brush_speed = self.last_brush_speed
+        #     if (self.last_left_speed != left_speed or
+        #         self.last_right_speed != right_speed or
+        #         self.last_brush_speed != brush_speed):
+        #         self.set_target_velocity(3, left_speed)
+        #         self.set_target_velocity(2, right_speed)
+        #         self.set_target_velocity(4, brush_speed)
+        #         self.last_left_speed = left_speed
+        #         self.last_right_speed = right_speed
+        #         self.last_brush_speed = brush_speed
+
+
+        #     if self.is_lowstop and 0 < self.imu_yaw < 1:
+        #         if self.prev_motion_state:
+        #             self.set_state(self.prev_motion_state)
+        #             self.prev_motion_state = None
+        #         self.is_lowstop = False
+        #     self.current_velocity_up = left_speed
+        #     self.current_velocity_low = right_speed
+        #     self.current_velocity_brush = brush_speed
 
         # 4. STOP状态或IMU角度异常
         elif self.current_status == "STOP" or not -5 < self.imu_yaw < 5:
