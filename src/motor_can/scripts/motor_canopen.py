@@ -587,18 +587,18 @@ class ServoDriveController:
                 #清空自动流程状态
                 self.complete_state = True
                 self.auto_step = None
-            elif (msg.sensor_a and not msg.sensor_c):
-                self.set_state("LOWSTOP")
-                #确保停到位
-                time.sleep(2)
-                self.set_state("STOP")
-                self.complete_state = False
+            # elif (msg.sensor_a and not msg.sensor_c):
+            #     self.set_state("LOWSTOP")
+            #     #确保停到位
+            #     time.sleep(2)
+            #     self.set_state("STOP")
+            #     self.complete_state = False
 
-            elif (msg.sensor_c and not msg.sensor_a):
-                self.set_state("UPSTOP")
-                time.sleep(2)
-                self.set_state("STOP")
-                self.complete_state = False
+            # elif (msg.sensor_c and not msg.sensor_a):
+            #     self.set_state("UPSTOP")
+            #     time.sleep(2)
+            #     self.set_state("STOP")
+            #     self.complete_state = False
 
         if self.current_status == self.status_list[5]: #自动模式
             # 检测起始位置，进入第一步动作，有待测试
@@ -702,7 +702,7 @@ class ServoDriveController:
         # 3. 单侧停止状态（UPSTOP/LOWSTOP）
         elif self.current_status == "UPSTOP":
             left_speed = 0
-            right_speed = self.last_right_speed  # 右轮保持切换前速度
+            right_speed = -self.last_right_speed  # 右轮保持切换前速度 >> 右轮反向
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -725,7 +725,7 @@ class ServoDriveController:
             self.current_velocity_brush = brush_speed
         
         elif self.current_status == "LOWSTOP":
-            left_speed = self.last_left_speed  # 左轮保持切换前速度
+            left_speed = -self.last_left_speed  # 左轮保持切换前速度 >> 左轮反向
             right_speed = 0
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
