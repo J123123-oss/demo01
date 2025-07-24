@@ -700,9 +700,10 @@ class ServoDriveController:
             self.current_velocity_brush = brush_speed
 
         # 3. 单侧停止状态（UPSTOP/LOWSTOP）
-        elif self.current_status == "UPSTOP":
-            left_speed = 0
-            right_speed = -self.last_right_speed  # 右轮保持切换前速度 >> 右轮反向
+        elif self.current_status in ["UPSTOP", "LOWSTOP"]:
+            correction = self.pid_correction(self.imu_yaw) * rate
+            right_speed = int(-self.last_right_speed + correction) # 右轮保持切换前速度 >> 右轮反向
+            left_speed = int(-self.last_left_speed + correction)
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -725,8 +726,9 @@ class ServoDriveController:
             self.current_velocity_brush = brush_speed
         
         elif self.current_status == "LOWSTOP":
-            left_speed = -self.last_left_speed  # 左轮保持切换前速度 >> 左轮反向
-            right_speed = 0
+            correction = self.pid_correction(self.imu_yaw) * rate
+            left_speed = int(-self.last_left_speed + correction) # 左轮保持切换前速度 >> 左轮反向
+            right_speed = int (-self.last_right_speed + correction)  # 右轮保持切换前速度 >> 右轮反向
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or

@@ -18,7 +18,7 @@
     <!-- </node>     -->
     <!-- <node pkg="serial_comms" type="distance_can.py" name="distance_can" output="screen"> -->
     <!-- </node> -->
-    <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor" output="screen">
+    <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor">
     </node>
 
     <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen" />
