@@ -925,7 +925,7 @@ def main():
     rospy.loginfo("电机初始化完成（Ctrl+C 退出）")
     # 订阅速度命令话题
     # rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
-    rospy.Subscriber("proximity_sensor_data", String, lambda msg: controller.proximity_callback(msg))
+    rospy.Subscriber("proximity_sensor_data", Sensors, lambda msg: controller.proximity_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
     t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)

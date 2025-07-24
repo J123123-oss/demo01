@@ -133,7 +133,7 @@ class ModbusRTUSwitchReader:
 
 if __name__ == "__main__":
     try:
-        reader = ModbusRTUSwitchReader(port='/dev/ttyUSB0')
+        reader = ModbusRTUSwitchReader(port='/dev/ProximitySensor')
         rospy.loginfo("Proximity sensor node started")
         rospy.spin()  # 保持节点运行，直到接收到关闭信号
     except rospy.ROSInterruptException:
