@@ -743,12 +743,12 @@ class ServoDriveController:
                 # 使用更平滑的速度调整方式
                 if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                     # 根据偏差方向调整轮速
-                    right_speed = int(0.8 * self.last_right_speed + correction)  # 基础后退速度+校正
-                    left_speed = int(0.8 * self.last_left_speed + correction)
+                    right_speed = int( self.last_right_speed + correction)  # 基础后退速度+校正
+                    left_speed = int(self.last_left_speed + correction)
                 else:
                     # 角度接近时减速
-                    right_speed = int(0.5 * self.last_right_speed + correction)
-                    left_speed = int(0.5 * self.last_left_speed + correction)
+                    right_speed = int(0.8 * self.last_right_speed + correction)
+                    left_speed = int(0.8 * self.last_left_speed + correction)
                     
                 brush_speed = self.last_brush_speed
                 
@@ -766,7 +766,8 @@ class ServoDriveController:
                 current_time = time.time()
                 # 条件1: 角度满足要求
                 # 条件2: 已经后退了足够时间（例如2秒） 默认2
-                if (-0.5 < self.imu_yaw < 0.5) and (current_time - self.reverse_start_time > 2.5):
+                # if abs(self.imu_yaw) < 0.2 and (current_time - self.reverse_start_time > 2.5):
+                if abs(self.imu_yaw) < 0.2:
                     if self.prev_motion_state:
                         self.set_state(self.prev_motion_state)
                         self.prev_motion_state = None
