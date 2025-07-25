@@ -668,7 +668,7 @@ class ServoDriveController:
                 self.set_state(self.auto_step)
             return
 
-        # 2. FORWARD/BACKWARD状态：IMU矫正+ 单侧停止
+        # 2. FORWARD/BACKWARD状态：IMU矫正
         if self.current_status in ["FORWARD", "BACKWARD"]:
             correction = self.pid_correction(self.imu_yaw) * rate
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
@@ -720,14 +720,18 @@ class ServoDriveController:
             # 执行后退矫正
             if not self.has_reverse_flag:
                 correction = self.pid_correction(self.imu_yaw) * rate
-                right_speed = int(-self.last_right_speed + correction) # >> 两轮反向运行进行调整
-                left_speed = int(-self.last_left_speed + correction)
+                right_speed = -int(self.last_right_speed + correction) # >> 两轮反向运行进行调整
+                left_speed = -int(self.last_left_speed + correction)
                 brush_speed = self.last_brush_speed
-                
-                # 设置速度
-                self.set_target_velocity(3, left_speed)
-                self.set_target_velocity(2, right_speed)
-                self.set_target_velocity(4, brush_speed)
+                if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                    rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                    rospy.loginfo(f"后退左轮速度: {left_speed}, 右轮速度: {right_speed}")
+                    # 设置速度
+                    self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(2, right_speed)
+                    self.set_target_velocity(4, brush_speed)
                 # 更新最后速度记录
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
@@ -751,11 +755,16 @@ class ServoDriveController:
                     left_speed = int(0.8 * self.last_left_speed + correction)
                     
                 brush_speed = self.last_brush_speed
+                if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                    rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                    rospy.loginfo(f"后退完毕左轮速度: {left_speed}, 右轮速度: {right_speed}")
                 
-                # 设置速度
-                self.set_target_velocity(3, left_speed)
-                self.set_target_velocity(2, right_speed)
-                self.set_target_velocity(4, brush_speed)
+                    # 设置速度
+                    self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(2, right_speed)
+                    self.set_target_velocity(4, brush_speed)
                 
                 # 更新最后速度记录
                 self.last_left_speed = left_speed
