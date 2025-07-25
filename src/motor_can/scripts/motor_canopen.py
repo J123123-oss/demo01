@@ -622,7 +622,7 @@ class ServoDriveController:
         error = self.target_yaw - current_yaw
         self.pid_integral += error
         derivative = error - self.pid_last_error
-        if abs(error) > 0.2:  # 如果误差小于0.3度，则不进行修正
+        if abs(error) > 0.2:  # 如果误差小于0.2度，则不进行修正
             correction = (self.pid_kp * error +
                         self.pid_ki * self.pid_integral +
                         self.pid_kd * derivative) 
@@ -631,6 +631,7 @@ class ServoDriveController:
             correction = 0  # 在小范围内不进行调整
 
         self.pid_last_error = error
+        correction = max(min(correction, 100), -100)  # 限制修正量在-100到100之间
         return correction
         # return correction if self.current_status in ["FORWARD","LOADING"] else -correction
     
@@ -719,10 +720,14 @@ class ServoDriveController:
         elif self.current_status == "REVERSE":
             # 执行后退矫正
             if not self.has_reverse_flag:
+                #考虑使用固定速度
+                base_speed = 17000
                 correction = self.pid_correction(self.imu_yaw) * rate
                 right_speed = -int(self.last_right_speed + correction) # >> 两轮反向运行进行调整
                 left_speed = -int(self.last_left_speed + correction)
                 brush_speed = self.last_brush_speed
+                right_speed = max(min(right_speed, 17000), -17000)
+                left_speed = max(min(left_speed, 17000), -17000)
                 if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -753,7 +758,8 @@ class ServoDriveController:
                     # 角度接近时减速
                     right_speed = int(0.8 * self.last_right_speed + correction)
                     left_speed = int(0.8 * self.last_left_speed + correction)
-                    
+                right_speed = max(min(right_speed, 17000), -17000)
+                left_speed = max(min(left_speed, 17000), -17000)
                 brush_speed = self.last_brush_speed
                 if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
