@@ -433,6 +433,7 @@ class ServoDriveController:
             return {}
     
     def update_status_by_key(self, key):
+        rospy.loginfo(f"接收到按键: {key}")  # 添加这行日志来确认接收到的按键值
         key_mapping = {
             's': "STOP",
             'f': "FORWARD",
@@ -687,7 +688,7 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-            if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
+            if -5 < self.imu_yaw < -1.5 or 1.5 < self.imu_yaw < 5:
                 self.set_state("REVERSE")  # 进入后退矫正状态
 
             # if -5 < self.imu_yaw < -2:
@@ -742,8 +743,8 @@ class ServoDriveController:
                 # 使用更平滑的速度调整方式
                 if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                     # 根据偏差方向调整轮速
-                    right_speed = int(0.7 * self.last_right_speed + correction)  # 基础后退速度+校正
-                    left_speed = int(0.7 * self.last_left_speed + correction)
+                    right_speed = int(0.8 * self.last_right_speed + correction)  # 基础后退速度+校正
+                    left_speed = int(0.8 * self.last_left_speed + correction)
                 else:
                     # 角度接近时减速
                     right_speed = int(0.5 * self.last_right_speed + correction)
@@ -764,8 +765,8 @@ class ServoDriveController:
                 # 检查是否满足恢复条件
                 current_time = time.time()
                 # 条件1: 角度满足要求
-                # 条件2: 已经后退了足够时间（例如2.0秒）
-                if (-1 < self.imu_yaw < 0) and (current_time - self.reverse_start_time > 2.0):
+                # 条件2: 已经后退了足够时间（例如2秒） 默认2
+                if (-0.5 < self.imu_yaw < 0.5) and (current_time - self.reverse_start_time > 2.5):
                     if self.prev_motion_state:
                         self.set_state(self.prev_motion_state)
                         self.prev_motion_state = None
@@ -926,8 +927,8 @@ def main():
     rospy.Subscriber("proximity_sensor_data", Sensors, lambda msg: controller.proximity_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
-    t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
-    t.start()
+    # t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
+    # t.start()
     try:
     # 每0.2秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.2), controller.execute_state)

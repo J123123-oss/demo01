@@ -20,7 +20,7 @@
     <!-- <node pkg="serial_comms" type="distance_can.py" name="distance_can" output="screen"> -->
     <!-- </node> -->
     <!-- 接近开关使用Modbus RTU协议 -->
-    <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor">
+    <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor"/>
     <!-- 接近开关使用CAN协议 -->
     <!-- <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" /> -->
 
