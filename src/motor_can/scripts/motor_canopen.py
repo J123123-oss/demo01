@@ -25,7 +25,9 @@ class ServoDriveController:
         self.last_right_speed = 0
         self.last_brush_speed = 0
         self.has_reverse_flag = False
+        self.has_reverse_counter = 0
         self.reverse_start_time = None
+        self.motor_driver =True
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态
@@ -153,6 +155,7 @@ class ServoDriveController:
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
+        self.progress = 0   # 进度百分比，0-100
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
@@ -175,6 +178,8 @@ class ServoDriveController:
         if new_state == "START":
             self.complete_state = False
             self.enable_drive_flag = True
+            self.progress = 0
+            self.motor_driver = True  # 电机驱动器状态
             # self.auto_mode = True # 手动设置其他状态应关闭自动
             # 自动模式下恢复未完成动作
             # if self.auto_mode and self.auto_step:
@@ -287,7 +292,7 @@ class ServoDriveController:
         state_msg = {
             "status": self.current_status,
             "battery": 78,
-            "progress": 45,
+            "progress": self.progress,
             "imu_yaw": self.imu_yaw,  # IMU偏航角
             "velocity_up": self.current_velocity_up / rate,  # 单位转换为RPM
             "velocity_low": self.current_velocity_low / rate,
@@ -297,7 +302,7 @@ class ServoDriveController:
             "device_status": {
             "main_board": True,
             "imu_sensor": True,
-            "motor_driver": True,
+            "motor_driver": self.motor_driver,
             "comm_module": True  },
             "complete_state":self.complete_state, # 任务完成状态
             "auto_mode": self.auto_mode, # 自动模式开关,默认开
@@ -568,15 +573,16 @@ class ServoDriveController:
         else:
             self.sensors_status &= ~0x08
         # 自动与手动模式下的检测
-        if self.auto_mode: # 自动模式未开启，待完善：第一步UNLOADING or BACKWARD ？
+        if self.auto_mode: # 自动模式未开启，完善：第一步START>BACKWARD>FORWARD>LOADING>STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a or msg.sensor_c):
-                    self.set_state("STOP")
-
+                    self.set_state("STOP") #暂时
+                    self.progress = 100
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b or msg.sensor_d):
                     #自动程序：第一步检测接近开关到位>后退>到边缘自动切换前进>直到进仓>发布完成消息>STOP停止使能。
                     self.set_state("FORWARD")
+                    self.progress = 60
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a): # 无仓时不可用
@@ -596,6 +602,7 @@ class ServoDriveController:
                 time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
+                self.progress = 100
                 self.auto_step = None
             elif (msg.sensor_a and not msg.sensor_c):
                 self.set_state("LOWSTOP")
@@ -613,10 +620,12 @@ class ServoDriveController:
                     self.complete_state = True
                 else:
                     self.complete_state = False
-        if self.current_status == self.status_list[5]: #自动模式
+        if self.auto_mode and self.current_status == self.status_list[3]: #修改自动模式 >> START
             # 检测起始位置，进入第一步动作，有待测试
+            # if (msg.sensor_a and msg.sensor_c):
             if (msg.sensor_a):
                 self.set_state("BACKWARD")
+                self.progress = 10
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -720,6 +729,13 @@ class ServoDriveController:
         elif self.current_status == "REVERSE":
             # 执行后退矫正
             if not self.has_reverse_flag:
+                self.has_reverse_counter += 1  # 标记后退次数
+                if self.has_reverse_counter > 4:  # 连续后退3次后
+                    rospy.logwarn("连续后退4次，可能需要手动干预")
+                    self.has_reverse_counter = 0
+                    self.set_state("STOP")  # 停止后退
+                    self.motor_driver = False  # 预警
+                    return
                 #考虑使用固定速度
                 base_speed = 17000
                 correction = self.pid_correction(self.imu_yaw) * rate
@@ -780,7 +796,7 @@ class ServoDriveController:
                 # 检查是否满足恢复条件
                 current_time = time.time()
                 # 条件1: 角度满足要求
-                # 条件2: 已经后退了足够时间（例如2秒） 默认2
+                # 条件2: 已经后退了足够时间（例如2秒） 默认2  去除
                 # if abs(self.imu_yaw) < 0.2 and (current_time - self.reverse_start_time > 2.5):
                 if abs(self.imu_yaw) < 0.2:
                     if self.prev_motion_state:
@@ -789,6 +805,7 @@ class ServoDriveController:
                     self.is_upstop = False
                     self.is_lowstop = False
                     self.has_reverse_flag = False  # 重置标志位
+                    self.has_reverse_counter = 0  # 重置后退计数器
             
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
