@@ -28,6 +28,9 @@ class ServoDriveController:
         self.has_reverse_counter = 0
         self.reverse_start_time = None
         self.motor_driver =True
+        self.base_speed = 17000 * 0.8  #设置后退基础速度值
+        self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
+
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态
@@ -202,6 +205,7 @@ class ServoDriveController:
         # 进入反向调整、单侧停止时，记录当前运动状态
         if new_state == "REVERSE":
             self.prev_motion_state = self.last_state
+            
         elif new_state == "UPSTOP":
             self.prev_motion_state = self.last_state
         elif new_state == "LOWSTOP":
@@ -727,6 +731,7 @@ class ServoDriveController:
 
         # 3. 反向调整状态
         elif self.current_status == "REVERSE":
+            
             # 执行后退矫正
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1  # 标记后退次数
@@ -737,17 +742,16 @@ class ServoDriveController:
                     self.motor_driver = False  # 预警
                     return
                 #考虑使用固定速度
-                base_speed = 17000
-                correction = self.pid_correction(self.imu_yaw) * rate
-                right_speed = -int(self.last_right_speed + correction) # >> 两轮反向运行进行调整
-                left_speed = -int(self.last_left_speed + correction)
+                # correction = self.pid_correction(self.imu_yaw) * rate
+                right_speed = -int(self.last_right_speed ) # >> 两轮反向运行进行调整
+                left_speed = -int(self.last_left_speed )
                 brush_speed = self.last_brush_speed
                 right_speed = max(min(right_speed, 17000), -17000)
                 left_speed = max(min(left_speed, 17000), -17000)
                 if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                    rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                    rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}")
                     rospy.loginfo(f"后退左轮速度: {left_speed}, 右轮速度: {right_speed}")
                     # 设置速度
                     self.set_target_velocity(3, left_speed)
@@ -761,26 +765,29 @@ class ServoDriveController:
                 # 标记已执行后退
                 self.has_reverse_flag = True
                 self.reverse_start_time = time.time()  # 记录后退开始时间
+                time.sleep(2.0)
             else:
+                if self.imu_yaw >= 0:
+                    self.flag = -1
+                elif self.imu_yaw < 0:
+                    self.flag = 1
                 # 后退后执行角度校正
-                correction = self.pid_correction(self.imu_yaw) * rate
-                
+                # correction = self.pid_correction(self.imu_yaw) * rate
+                rotation_speed = 6800
                 # 使用更平滑的速度调整方式
-                if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
+                # if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                     # 根据偏差方向调整轮速
-                    right_speed = int( self.last_right_speed + correction)  # 基础后退速度+校正
-                    left_speed = int(self.last_left_speed + correction)
-                else:
+                right_speed = left_speed = int (15000 * self.flag)  # 基础后退速度+校正
+                # else:
                     # 角度接近时减速
-                    right_speed = int(0.8 * self.last_right_speed + correction)
-                    left_speed = int(0.8 * self.last_left_speed + correction)
+                    # right_speed = left_speed = int(15000 * 0.6 * self.flag)
                 right_speed = max(min(right_speed, 17000), -17000)
                 left_speed = max(min(left_speed, 17000), -17000)
                 brush_speed = self.last_brush_speed
                 if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                    rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                    rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}")
                     rospy.loginfo(f"后退完毕左轮速度: {left_speed}, 右轮速度: {right_speed}")
                 
                     # 设置速度
@@ -798,7 +805,7 @@ class ServoDriveController:
                 # 条件1: 角度满足要求
                 # 条件2: 已经后退了足够时间（例如2秒） 默认2  去除
                 # if abs(self.imu_yaw) < 0.2 and (current_time - self.reverse_start_time > 2.5):
-                if abs(self.imu_yaw) < 0.2:
+                if abs(self.imu_yaw) < 0.4:
                     if self.prev_motion_state:
                         self.set_state(self.prev_motion_state)
                         self.prev_motion_state = None
