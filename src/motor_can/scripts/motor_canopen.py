@@ -577,10 +577,12 @@ class ServoDriveController:
         else:
             self.sensors_status &= ~0x08
         # 自动与手动模式下的检测
-        if self.auto_mode: # 自动模式未开启，完善：第一步START>BACKWARD>FORWARD>LOADING>STOP 
+        if self.auto_mode: # 自动模式未开启，完善：第一步START>BACKWARD>FORWARD>"""LOADING""">STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a or msg.sensor_c):
                     self.set_state("STOP") #暂时
+                    # self.has_reverse_counter = 0  # 重置后退计数器
+                    
                     self.progress = 100
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b or msg.sensor_d):
@@ -592,11 +594,13 @@ class ServoDriveController:
                 if (msg.sensor_a): # 无仓时不可用
                     rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
                     self.set_state("BACKWARD")
+                    self.progress = 60
                     rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b):
                     rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
                     self.set_state("FORWARD")
+                    self.progress = 10
                     rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
         # 进仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均到位再切换下个状态。
         if self.current_status == self.status_list[4]:  # LOADING
@@ -606,6 +610,7 @@ class ServoDriveController:
                 time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
+                # self.has_reverse_counter = 0  # 重置后退计数器
                 self.progress = 100
                 self.auto_step = None
             elif (msg.sensor_a and not msg.sensor_c):
@@ -735,8 +740,8 @@ class ServoDriveController:
             # 执行后退矫正
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1  # 标记后退次数
-                if self.has_reverse_counter > 4:  # 连续后退3次后
-                    rospy.logwarn("连续后退4次，可能需要手动干预")
+                if self.has_reverse_counter > 5:  # 连续后退3次后
+                    rospy.logwarn("连续后退5次，可能需要手动干预")
                     self.has_reverse_counter = 0
                     self.set_state("STOP")  # 停止后退
                     self.motor_driver = False  # 预警
@@ -771,16 +776,13 @@ class ServoDriveController:
                     self.flag = -1
                 elif self.imu_yaw < 0:
                     self.flag = 1
-                # 后退后执行角度校正
-                # correction = self.pid_correction(self.imu_yaw) * rate
-                rotation_speed = 6800
                 # 使用更平滑的速度调整方式
-                # if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
-                    # 根据偏差方向调整轮速
-                right_speed = left_speed = int (15000 * self.flag)  # 基础后退速度+校正
-                # else:
+                if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
+                # 根据偏差方向调整轮速
+                    right_speed = left_speed = int (15000 * self.flag)  # 基础后退速度+校正
+                else:
                     # 角度接近时减速
-                    # right_speed = left_speed = int(15000 * 0.6 * self.flag)
+                    right_speed = left_speed = int(15000 * 0.6 * self.flag)
                 right_speed = max(min(right_speed, 17000), -17000)
                 left_speed = max(min(left_speed, 17000), -17000)
                 brush_speed = self.last_brush_speed
@@ -805,14 +807,14 @@ class ServoDriveController:
                 # 条件1: 角度满足要求
                 # 条件2: 已经后退了足够时间（例如2秒） 默认2  去除
                 # if abs(self.imu_yaw) < 0.2 and (current_time - self.reverse_start_time > 2.5):
-                if abs(self.imu_yaw) < 0.4:
+                if abs(self.imu_yaw) < 0.2:
                     if self.prev_motion_state:
                         self.set_state(self.prev_motion_state)
                         self.prev_motion_state = None
                     self.is_upstop = False
                     self.is_lowstop = False
                     self.has_reverse_flag = False  # 重置标志位
-                    self.has_reverse_counter = 0  # 重置后退计数器
+                    # self.has_reverse_counter = 0  # 重置后退计数器
             
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
@@ -871,6 +873,7 @@ class ServoDriveController:
             if (self.last_left_speed != 0 or
                 self.last_right_speed != 0 or
                 self.last_brush_speed != 0):
+                self.has_reverse_counter = 0  # 重置后退计数器
 
                 self.set_target_velocity(2, 0)
                 self.set_target_velocity(3, 0)
