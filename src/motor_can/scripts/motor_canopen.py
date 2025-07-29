@@ -594,13 +594,13 @@ class ServoDriveController:
                 if (msg.sensor_a): # 无仓时不可用
                     rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
                     self.set_state("BACKWARD")
-                    self.progress = 60
+                    self.progress = 10
                     rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b):
                     rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
                     self.set_state("FORWARD")
-                    self.progress = 10
+                    self.progress = 60
                     rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
         # 进仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均到位再切换下个状态。
         if self.current_status == self.status_list[4]:  # LOADING
@@ -693,6 +693,9 @@ class ServoDriveController:
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            right_speed = max(min(right_speed, 17000), -17000)
+            left_speed = max(min(left_speed, 17000), -17000)
+
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
