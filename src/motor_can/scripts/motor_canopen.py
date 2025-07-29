@@ -215,6 +215,7 @@ class ServoDriveController:
             self.prev_motion_state = self.last_state
         elif new_state == "ROLLER_DECEL":#清空自动模式下记忆的状态
             self.auto_step = None
+            self.initial_yaw = None  # 重置初始偏航角
         elif new_state == "ROLLER_ACCEL": #切换手动与自动模式
             if( self.count % 2 ):
                 self.auto_mode = False
@@ -584,6 +585,11 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a or msg.sensor_c):
                     self.set_state("STOP") #暂时
+                    time.sleep(1)
+                    #清空自动流程状态
+                    self.complete_state = True
+                    self.initial_yaw = None  # 重置初始偏航角
+                    
                     # self.has_reverse_counter = 0  # 重置后退计数器
                     
                     self.progress = 100
@@ -613,6 +619,8 @@ class ServoDriveController:
                 time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
+                self.initial_yaw = None  # 重置初始偏航角
+
                 # self.has_reverse_counter = 0  # 重置后退计数器
                 self.progress = 100
                 self.auto_step = None
@@ -951,7 +959,8 @@ class ServoDriveController:
             # 非阻塞读取键盘
             if select.select([sys.stdin], [], [], 0.1)[0]:
                 key = sys.stdin.readline().strip()
-                controller.update_status_by_key(key)    
+                if key:
+                    controller.update_status_by_key(key)    
 
 def main():
     rospy.init_node("motor_canopen_node")
@@ -986,8 +995,8 @@ def main():
     rospy.Subscriber("proximity_sensor_data", Sensors, lambda msg: controller.proximity_callback(msg))
     #通过检测按键修改运行状态
     # 启动键盘监听线程
-    # t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
-    # t.start()
+    t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
+    t.start()
     try:
     # 每0.2秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.2), controller.execute_state)
