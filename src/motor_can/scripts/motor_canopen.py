@@ -707,7 +707,7 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-            if -5 < self.imu_yaw < -1.5 or 1.5 < self.imu_yaw < 5:
+            if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
                 self.set_state("REVERSE")  # 进入后退矫正状态
 
             # if -5 < self.imu_yaw < -2:
