@@ -202,6 +202,9 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
+        if new_state in[ "FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
+            self.prev_motion_state = self.last_state
+            # rospy.loginfo(f"保存的上个状态: {self.prev_motion_state}")
         # 进入反向调整、单侧停止时，记录当前运动状态
         if new_state == "REVERSE":
             self.prev_motion_state = self.last_state
@@ -709,10 +712,14 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-
-            if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
-                self.set_state("REVERSE")  # 进入后退矫正状态
-
+            # 检查是否需要进入后退矫正状态
+            # rospy.loginfo(f"在execute中的：{self.prev_motion_state}")
+            if self.prev_motion_state != "REVERSE":
+                if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
+                    self.set_state("REVERSE")  # 进入后退矫正状态
+            else:
+                if -5 < self.imu_yaw < -3.5 or 3.5 < self.imu_yaw < 5:
+                    self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             # if -5 < self.imu_yaw < -2:
             #     # time.sleep(1.0)
             #     rospy.loginfo(f"last_L_speed: {self.last_left_speed}")
@@ -782,10 +789,10 @@ class ServoDriveController:
                 # 使用更平滑的速度调整方式
                 if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                 # 根据偏差方向调整轮速
-                    right_speed = left_speed = int (15000 * self.flag)  # 基础后退速度+校正
+                    right_speed = left_speed = int (15000 * 0.6 * self.flag)  # 基础后退速度+校正
                 else:
                     # 角度接近时减速
-                    right_speed = left_speed = int(15000 * 0.6 * self.flag)
+                    right_speed = left_speed = int(15000 * 0.3 * self.flag)
                 right_speed = max(min(right_speed, 17000), -17000)
                 left_speed = max(min(left_speed, 17000), -17000)
                 brush_speed = self.last_brush_speed
@@ -812,8 +819,10 @@ class ServoDriveController:
                 # if abs(self.imu_yaw) < 0.2 and (current_time - self.reverse_start_time > 2.5):
                 if abs(self.imu_yaw) < 0.2:
                     if self.prev_motion_state:
-                        self.set_state(self.prev_motion_state)
-                        self.prev_motion_state = None
+                        # 保存要恢复的状态，避免在set_state中被重置
+                        restore_state = self.prev_motion_state
+                        self.prev_motion_state = None  # 先重置，避免在set_state中冲突
+                        self.set_state(restore_state)
                     self.is_upstop = False
                     self.is_lowstop = False
                     self.has_reverse_flag = False  # 重置标志位
@@ -841,8 +850,10 @@ class ServoDriveController:
 
             if self.is_upstop and 0 < self.imu_yaw < 1:
                 if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                    self.prev_motion_state = None
+                    # 保存要恢复的状态，避免在set_state中被重置
+                    restore_state = self.prev_motion_state
+                    self.prev_motion_state = None  # 先重置，避免在set_state中冲突
+                    self.set_state(restore_state)
                 self.is_upstop = False
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
@@ -864,8 +875,10 @@ class ServoDriveController:
 
             if self.is_lowstop and 0 < self.imu_yaw < 1:
                 if self.prev_motion_state:
-                    self.set_state(self.prev_motion_state)
-                    self.prev_motion_state = None
+                    # 保存要恢复的状态，避免在set_state中被重置
+                    restore_state = self.prev_motion_state
+                    self.prev_motion_state = None  # 先重置，避免在set_state中冲突
+                    self.set_state(restore_state)
                 self.is_lowstop = False
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
