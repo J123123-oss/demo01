@@ -643,7 +643,8 @@ class ServoDriveController:
         if self.auto_mode and self.current_status == self.status_list[3]: #修改自动模式 >> START
             # 检测起始位置，进入第一步动作，有待测试
             # if (msg.sensor_a and msg.sensor_c):
-            if (msg.sensor_a):
+            time.sleep(3) # 等待初始化
+            if (msg.sensor_a): #检测是否到位
                 self.set_state("BACKWARD")
                 self.progress = 10
     def pid_correction(self, current_yaw):

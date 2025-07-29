@@ -111,7 +111,7 @@ class DigitalInputReader:
                 # 检查响应格式 (功能码0x04 + 设备地址 + 状态)
                 expected_id = (0x04 << 8) | self.device_address
                 if response.arbitration_id == expected_id and len(response.data) >= 2:
-                    if response.data[0] == 0xB2:
+                    if response.data[1] == 0x0b:
                         rospy.loginfo("Device confirmed baudrate setting successfully")
                         return True
         rospy.logwarn("No confirmation received for baudrate setting. Device may require power cycle.")
