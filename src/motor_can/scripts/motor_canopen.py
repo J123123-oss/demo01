@@ -801,7 +801,7 @@ class ServoDriveController:
                     right_speed = left_speed = int (15000 * 0.6 * self.flag)  # 基础后退速度+校正
                 else:
                     # 角度接近时减速
-                    right_speed = left_speed = int(15000 * 0.3 * self.flag)
+                    right_speed = left_speed = int(15000 * 0.2 * self.flag)
                 right_speed = max(min(right_speed, 17000), -17000)
                 left_speed = max(min(left_speed, 17000), -17000)
                 brush_speed = self.last_brush_speed
