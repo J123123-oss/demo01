@@ -145,7 +145,7 @@ class ServoDriveController:
         self.prev_motion_state = None  # 记录进入单侧停止前的运动状态。
         self.is_upstop = False
         self.is_lowstop = False
-        self.auto_mode = False #默认自动模式
+        self.auto_mode = True #默认自动模式
         self.auto_step = None # 当前自动程序所在状态
         self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒2次
@@ -581,13 +581,15 @@ class ServoDriveController:
         else:
             self.sensors_status &= ~0x08
         # 自动与手动模式下的检测
-        if self.auto_mode: # 自动模式未开启，完善：第一步START>BACKWARD>FORWARD>"""LOADING""">STOP 
+        if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>"""LOADING""">STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a or msg.sensor_c):
                     self.set_state("STOP") #暂时
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
+                    self.auto_step = None
+
                     self.initial_yaw = None  # 重置初始偏航角
                     
                     # self.has_reverse_counter = 0  # 重置后退计数器
