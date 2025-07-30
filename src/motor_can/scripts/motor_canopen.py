@@ -826,7 +826,7 @@ class ServoDriveController:
                 # 条件1: 角度满足要求
                 # 条件2: 已经后退了足够时间（例如2秒） 默认2  去除
                 # if abs(self.imu_yaw) < 0.2 and (current_time - self.reverse_start_time > 2.5):
-                if abs(self.imu_yaw) < 0.2:
+                if abs(self.imu_yaw) < 0.05:
                     if self.prev_motion_state:
                         # 保存要恢复的状态，避免在set_state中被重置
                         restore_state = self.prev_motion_state
@@ -999,8 +999,8 @@ def main():
     t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
     t.start()
     try:
-    # 每0.2秒执行一次状态执行器
-        rospy.Timer(rospy.Duration(0.2), controller.execute_state)
+    # 每0.1秒执行一次状态执行器
+        rospy.Timer(rospy.Duration(0.1), controller.execute_state)
         # 每0.5秒发布一次状态
         # rospy.Timer(rospy.Duration(0.5), lambda event: controller.publish_state())
         rospy.spin()
