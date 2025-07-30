@@ -97,7 +97,8 @@ class ServoDriveController:
                 #目前用与自动模式与手动模式的切换
             },
             "ROLLER_DECEL":{
-                #目前用于清空自动模式的状态
+                #目前用于清空自动模式的状态 不符合逻辑，已禁用
+                #切换为重置初始偏航角
             }
             # "FORWARD": {  # 测试电机功耗前进状态
             #     #下发100到电机减速20：1，实际为5RPM ，发250最终12.5RPM，速度0.078m/s
@@ -213,8 +214,8 @@ class ServoDriveController:
             self.prev_motion_state = self.last_state
         elif new_state == "LOWSTOP":
             self.prev_motion_state = self.last_state
-        elif new_state == "ROLLER_DECEL":#清空自动模式下记忆的状态
-            self.auto_step = None
+        elif new_state == "ROLLER_DECEL":#清空自动模式重置初始偏航角
+            # self.auto_step = None
             self.initial_yaw = None  # 重置初始偏航角
         elif new_state == "ROLLER_ACCEL": #切换手动与自动模式
             if( self.count % 2 ):
