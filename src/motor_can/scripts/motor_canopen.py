@@ -591,7 +591,8 @@ class ServoDriveController:
                     self.auto_step = None
 
                     self.initial_yaw = None  # 重置初始偏航角
-                    
+                    #重复运行测试
+                    self.set_state("START")
                     # self.has_reverse_counter = 0  # 重置后退计数器
                     
                     self.progress = 100
