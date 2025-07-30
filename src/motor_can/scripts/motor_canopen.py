@@ -605,14 +605,14 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a): # 无仓时不可用
                     rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-                    self.set_state("BACKWARD")
-                    self.progress = 10
+                    self.set_state("STOP")
+                    self.progress = 0
                     rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b):
                     rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-                    self.set_state("FORWARD")
-                    self.progress = 60
+                    self.set_state("STOP")
+                    self.progress = 0
                     rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
         # 进仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均到位再切换下个状态。
         if self.current_status == self.status_list[4]:  # LOADING
@@ -730,7 +730,7 @@ class ServoDriveController:
                 if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
                     self.set_state("REVERSE")  # 进入后退矫正状态
             else:
-                if -5 < self.imu_yaw < -3.5 or 3.5 < self.imu_yaw < 5:
+                if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
                     self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             # if -5 < self.imu_yaw < -2:
             #     # time.sleep(1.0)
