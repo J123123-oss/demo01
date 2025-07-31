@@ -586,7 +586,7 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if msg.sensor_a and msg.sensor_c:
                     self.set_state("STOP")
-                    time.sleep(1)
+                    # time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
                     self.initial_yaw = None  # 重置初始偏航角
@@ -597,7 +597,7 @@ class ServoDriveController:
                     #确保停到位
                     if msg.sensor_c:
                         self.set_state("STOP")
-                        time.sleep(1)
+                        # time.sleep(1)
                         #清空自动流程状态
                         self.complete_state = True
                         self.initial_yaw = None  # 重置初始偏航角
@@ -610,7 +610,7 @@ class ServoDriveController:
                     self.set_state("UPSTOP")
                     if msg.sensor_a:
                         self.set_state("STOP")
-                        time.sleep(1)
+                        # time.sleep(1)
                         #清空自动流程状态
                         self.complete_state = True
                         self.initial_yaw = None  # 重置初始偏航角
@@ -681,9 +681,9 @@ class ServoDriveController:
                     self.complete_state = False
         if self.auto_mode and self.current_status == self.status_list[3]: #修改自动模式 >> START
             # 检测起始位置，进入第一步动作，有待测试
-            # if (msg.sensor_a and msg.sensor_c):
             time.sleep(3) # 等待初始化
-            if (msg.sensor_a): #检测是否到位
+            # if (msg.sensor_a): #检测是否到位
+            if (msg.sensor_a and msg.sensor_c):
                 self.set_state("BACKWARD")
                 self.progress = 10
     def pid_correction(self, current_yaw):
@@ -896,7 +896,7 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
 
-            if self.is_upstop and abs(self.imu_yaw) < 0.1:
+            if self.is_upstop and abs(self.imu_yaw) < 1:
                 if self.prev_motion_state:
                     # 保存要恢复的状态，避免在set_state中被重置
                     restore_state = self.prev_motion_state
@@ -921,7 +921,7 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
 
-            if self.is_lowstop and abs(self.imu_yaw) < 0.1:
+            if self.is_lowstop and abs(self.imu_yaw) < 1:
                 if self.prev_motion_state:
                     # 保存要恢复的状态，避免在set_state中被重置
                     restore_state = self.prev_motion_state

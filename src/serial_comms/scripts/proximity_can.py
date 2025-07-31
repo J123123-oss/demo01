@@ -14,9 +14,9 @@ class DigitalInputReader:
         # ROS parameters
         self.device_address = rospy.get_param('~device_address', 1)
         self.can_interface = rospy.get_param('~can_interface', 'can0')
-        self.update_rate = rospy.get_param('~update_rate', 5.0)  # Hz
+        self.update_rate = rospy.get_param('~update_rate', 10.0)  # Hz
         self.baudrate = rospy.get_param('~baudrate', 1000000)  # 默认1Mbps(手册值0x0b)
-        self.request_baudrate = rospy.get_param('~request_baudrate', True)  # 是否设置波特率，设置1次，断电5秒后生效
+        self.request_baudrate = rospy.get_param('~request_baudrate', False)  # 是否设置波特率，设置1次，断电5秒后生效
         
         # CAN初始化
         self.bus = None
@@ -139,10 +139,10 @@ class DigitalInputReader:
             rospy.logdebug(f"Sent query frame: ID=0x{query_frame.arbitration_id:03x}")
             
             # 等待响应(增加超时时间)
-            response = self.bus.recv(0.8)
+            response = self.bus.recv(timeout=0.8)
             
             if not response:
-                rospy.logwarn("Timeout waiting for digital input response")
+                # rospy.logwarn("Timeout waiting for digital input response")
                 return
                 
             rospy.logdebug(f"Received response: ID=0x{response.arbitration_id:03x}, Len={len(response.data)}, Data={response.data}")
@@ -176,11 +176,11 @@ class DigitalInputReader:
             msg.sensor_b = bool(input_byte & 0b00001000)  # 通道7 (位6)3
             msg.sensor_c = bool(input_byte & 0b00000010)  # 通道3 (位2)1
             msg.sensor_d = bool(input_byte & 0b00000100)  # 通道5 (位4)2
-            msg.raw_value = input_byte
+            # msg.raw_value = input_byte
             
             # 发布消息
             self.all_inputs_pub.publish(msg)
-            rospy.loginfo(f"Published sensor data: [A:{msg.sensor_a}, B:{msg.sensor_b}, C:{msg.sensor_c}, D:{msg.sensor_d}] Raw:0x{input_byte:02x}")
+            # rospy.loginfo(f"Published sensor data: [A:{msg.sensor_a}, B:{msg.sensor_b}, C:{msg.sensor_c}, D:{msg.sensor_d}]")
         except Exception as e:
             rospy.logerr(f"Error processing sensor data: {str(e)}")
 
