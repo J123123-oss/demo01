@@ -172,10 +172,10 @@ class DigitalInputReader:
         try:
             msg = Sensors()
             # 根据手册：字节的每一位对应一个输入通道(bit0=通道1, bit7=通道8)
-            msg.sensor_a = bool(input_byte & 0b00000001)  # 通道1 (位0)
-            msg.sensor_b = bool(input_byte & 0b01000000)  # 通道7 (位6)
-            msg.sensor_c = bool(input_byte & 0b00000100)  # 通道3 (位2)
-            msg.sensor_d = bool(input_byte & 0b00010000)  # 通道5 (位4)
+            msg.sensor_a = bool(input_byte & 0b00000001)  # 通道1 (位0)0
+            msg.sensor_b = bool(input_byte & 0b00001000)  # 通道7 (位6)3
+            msg.sensor_c = bool(input_byte & 0b00000010)  # 通道3 (位2)1
+            msg.sensor_d = bool(input_byte & 0b00000100)  # 通道5 (位4)2
             msg.raw_value = input_byte
             
             # 发布消息
