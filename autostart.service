@@ -1,7 +1,6 @@
 [Unit]
 Description=AutoStart Service
-After=syslog.target network.target dev-ttyUSB1.device
-Wants=dev-ttyUSB1.device
+After=syslog.target network.target
 # 如果你的脚本需要网络，确保它在网络后启动
 
 [Service]

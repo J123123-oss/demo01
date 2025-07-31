@@ -594,30 +594,9 @@ class ServoDriveController:
                     self.auto_step = None
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
-                    #确保停到位
-                    if msg.sensor_c:
-                        self.set_state("STOP")
-                        # time.sleep(1)
-                        #清空自动流程状态
-                        self.complete_state = True
-                        self.initial_yaw = None  # 重置初始偏航角
-                        self.progress = 100
-                        self.auto_step = None
-                    else:
-                        self.complete_state = False
-
                 elif (msg.sensor_c and not msg.sensor_a):
                     self.set_state("UPSTOP")
-                    if msg.sensor_a:
-                        self.set_state("STOP")
-                        # time.sleep(1)
-                        #清空自动流程状态
-                        self.complete_state = True
-                        self.initial_yaw = None  # 重置初始偏航角
-                        self.progress = 100
-                        self.auto_step = None
-                    else:
-                        self.complete_state = False
+                    
 
                 # if (msg.sensor_a or msg.sensor_c):
                 #     self.set_state("STOP") #暂时
@@ -637,6 +616,32 @@ class ServoDriveController:
                     #自动程序：第一步检测接近开关到位>后退>到边缘(可加入对正程序?)自动切换前进>直到进仓>发布完成消息>STOP停止使能。
                     self.set_state("FORWARD")
                     self.progress = 60
+            if self.current_status == self.status_list[7]: #LOWSTOP 
+                 #确保停到位
+                if msg.sensor_c:
+                    self.set_state("STOP")
+                    # time.sleep(1)
+                    #清空自动流程状态
+                    self.complete_state = True
+                    self.initial_yaw = None  # 重置初始偏航角
+                    self.progress = 100
+                    self.auto_step = None
+                    self.is_lowstop = False
+                else:
+                    self.complete_state = False
+            if self.current_status == self.status_list[6]: #UPSTOP 
+                 #确保停到位
+                if msg.sensor_a:
+                    self.set_state("STOP")
+                    # time.sleep(1)
+                    #清空自动流程状态
+                    self.complete_state = True
+                    self.initial_yaw = None  # 重置初始偏航角
+                    self.progress = 100
+                    self.auto_step = None
+                    self.is_upstop = False
+                else:
+                    self.complete_state = False
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
                 if (msg.sensor_a): # 无仓时不可用
@@ -653,7 +658,7 @@ class ServoDriveController:
         # 进仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均到位再切换下个状态。
         if self.current_status == self.status_list[4]:  # LOADING
         # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
-            if msg.sensor_a and msg.sensor_c:
+            if msg.sensor_a or msg.sensor_c:
                 self.set_state("STOP")
                 time.sleep(1)
                 #清空自动流程状态
@@ -665,20 +670,10 @@ class ServoDriveController:
                 self.auto_step = None
             elif (msg.sensor_a and not msg.sensor_c):
                 self.set_state("LOWSTOP")
-                #确保停到位
-                if msg.sensor_c:
-                    self.set_state("STOP")
-                    self.complete_state = True
-                else:
-                    self.complete_state = False
 
             elif (msg.sensor_c and not msg.sensor_a):
                 self.set_state("UPSTOP")
-                if msg.sensor_a:
-                    self.set_state("STOP")
-                    self.complete_state = True
-                else:
-                    self.complete_state = False
+                
         if self.auto_mode and self.current_status == self.status_list[3]: #修改自动模式 >> START
             # 检测起始位置，进入第一步动作，有待测试
             time.sleep(3) # 等待初始化
@@ -883,7 +878,7 @@ class ServoDriveController:
         # 4. UPSTOP/LOWSTOP状态：IMU矫正+保持切换前速度
         elif self.current_status == "UPSTOP":
             left_speed = 0 # 上电机停
-            right_speed = self.last_right_speed  # 右轮保持切换前速度
+            right_speed = int(self.last_right_speed * 0.4)  # 右轮保持切换前速度
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -895,19 +890,17 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-
-            if self.is_upstop and abs(self.imu_yaw) < 1:
-                if self.prev_motion_state:
-                    # 保存要恢复的状态，避免在set_state中被重置
-                    restore_state = self.prev_motion_state
-                    self.prev_motion_state = None  # 先重置，避免在set_state中冲突
-                    self.set_state(restore_state)
-                self.is_upstop = False
+            # if self.is_upstop and abs(self.imu_yaw) < 1:
+            #     if self.prev_motion_state:
+            #         # 保存要恢复的状态，避免在set_state中被重置
+            #         restore_state = self.prev_motion_state
+            #         self.prev_motion_state = None  # 先重置，避免在set_state中冲突
+            #         self.set_state(restore_state)
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
-            left_speed = self.last_left_speed # 上电机保持切换前速度 
+            left_speed = int(self.last_left_speed * 0.4) # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
@@ -920,14 +913,14 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-
-            if self.is_lowstop and abs(self.imu_yaw) < 1:
-                if self.prev_motion_state:
-                    # 保存要恢复的状态，避免在set_state中被重置
-                    restore_state = self.prev_motion_state
-                    self.prev_motion_state = None  # 先重置，避免在set_state中冲突
-                    self.set_state(restore_state)
-                self.is_lowstop = False
+           
+            # if self.is_lowstop and abs(self.imu_yaw) < 1:
+            #     if self.prev_motion_state:
+            #         # 保存要恢复的状态，避免在set_state中被重置
+            #         restore_state = self.prev_motion_state
+            #         self.prev_motion_state = None  # 先重置，避免在set_state中冲突
+            #         self.set_state(restore_state)
+                # self.is_lowstop = False
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
