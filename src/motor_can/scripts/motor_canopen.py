@@ -584,22 +584,57 @@ class ServoDriveController:
         # 自动与手动模式下的检测
         if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>"""LOADING""">STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
-                if (msg.sensor_a or msg.sensor_c):
-                    self.set_state("STOP") #暂时
+                if msg.sensor_a and msg.sensor_c:
+                    self.set_state("STOP")
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
-                    self.auto_step = None
-
                     self.initial_yaw = None  # 重置初始偏航角
-                    #重复运行测试
-                    self.set_state("START")
-                    # self.has_reverse_counter = 0  # 重置后退计数器
-                    
                     self.progress = 100
+                    self.auto_step = None
+                elif (msg.sensor_a and not msg.sensor_c):
+                    self.set_state("LOWSTOP")
+                    #确保停到位
+                    if msg.sensor_c:
+                        self.set_state("STOP")
+                        time.sleep(1)
+                        #清空自动流程状态
+                        self.complete_state = True
+                        self.initial_yaw = None  # 重置初始偏航角
+                        self.progress = 100
+                        self.auto_step = None
+                    else:
+                        self.complete_state = False
+
+                elif (msg.sensor_c and not msg.sensor_a):
+                    self.set_state("UPSTOP")
+                    if msg.sensor_a:
+                        self.set_state("STOP")
+                        time.sleep(1)
+                        #清空自动流程状态
+                        self.complete_state = True
+                        self.initial_yaw = None  # 重置初始偏航角
+                        self.progress = 100
+                        self.auto_step = None
+                    else:
+                        self.complete_state = False
+
+                # if (msg.sensor_a or msg.sensor_c):
+                #     self.set_state("STOP") #暂时
+                #     time.sleep(1)
+                #     #清空自动流程状态
+                #     self.complete_state = True
+                #     self.auto_step = None
+
+                #     self.initial_yaw = None  # 重置初始偏航角
+                #     #重复运行测试
+                #     self.set_state("START")
+                #     # self.has_reverse_counter = 0  # 重置后退计数器
+                    
+                    # self.progress = 100
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b or msg.sensor_d):
-                    #自动程序：第一步检测接近开关到位>后退>到边缘自动切换前进>直到进仓>发布完成消息>STOP停止使能。
+                    #自动程序：第一步检测接近开关到位>后退>到边缘(可加入对正程序?)自动切换前进>直到进仓>发布完成消息>STOP停止使能。
                     self.set_state("FORWARD")
                     self.progress = 60
         else: # 手动模式，仅在前进与后退中切换
@@ -861,7 +896,7 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
 
-            if self.is_upstop and 0 < self.imu_yaw < 1:
+            if self.is_upstop and abs(self.imu_yaw) < 0.1:
                 if self.prev_motion_state:
                     # 保存要恢复的状态，避免在set_state中被重置
                     restore_state = self.prev_motion_state
@@ -886,7 +921,7 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
 
-            if self.is_lowstop and 0 < self.imu_yaw < 1:
+            if self.is_lowstop and abs(self.imu_yaw) < 0.1:
                 if self.prev_motion_state:
                     # 保存要恢复的状态，避免在set_state中被重置
                     restore_state = self.prev_motion_state
