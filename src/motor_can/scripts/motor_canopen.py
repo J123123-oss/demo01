@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import can
 import time
-import datetime
 import yaml
 import rospy
 import json
@@ -45,7 +44,7 @@ class ServoDriveController:
         # 定义状态及其对应的速度配置
         self.status_config = {
             "START": {  # 速度模式初始化并使能
-                # 原位置模式未启用
+                # 位置模式未启用
                 # "position_left": 65188,  # 左侧电机目标位置 由300cm转换而来  651883
                 # "position_right": -65188,  # 右侧电机目标位置              651883
                 # "velocity_up": 250 * rate,
@@ -129,9 +128,6 @@ class ServoDriveController:
         self.position_mode_configured = False  # 标记位置模式是否已配置
         self.left_position = 0
         self.right_position = 0
-        # self.forward_target = self.status_config["START"]["position_left"]
-        # self.backward_target = -self.status_config["START"]["position_left"]
-        # self.backward_target = self.status_config["START"]["position_right"]
         self.position_direction = 1  # 1: forward, -1: backward
         self.target_sent_flag = False  # 标记目标指令是否已下发
 
@@ -184,13 +180,6 @@ class ServoDriveController:
             self.enable_drive_flag = True
             self.progress = 0
             self.motor_driver = True  # 电机驱动器状态
-            # self.auto_mode = True # 手动设置其他状态应关闭自动
-            # 自动模式下恢复未完成动作
-            # if self.auto_mode and self.auto_step:
-            #     rospy.loginfo(f"恢复自动流程，继续执行: {self.auto_step}")
-            #     # 延迟一点时间，确保初始化完成
-            #     threading.Timer(3.0, lambda: self.set_state(self.auto_step)).start()
-            #     return True
 
         # STOP时3秒后，降低发布频率为半小时一次（30min*60=1800秒）    
         if new_state == "STOP":
@@ -206,14 +195,12 @@ class ServoDriveController:
         if new_state in[ "FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
             self.prev_motion_state = self.last_state
             # rospy.loginfo(f"保存的上个状态: {self.prev_motion_state}")
+        
         # 进入反向调整、单侧停止时，记录当前运动状态
-        if new_state == "REVERSE":
-            self.prev_motion_state = self.last_state
-            
-        elif new_state == "UPSTOP":
-            self.prev_motion_state = self.last_state
-        elif new_state == "LOWSTOP":
-            self.prev_motion_state = self.last_state
+        if new_state in ["REVERSE", "UPSTOP", "LOWSTOP"]:
+            if self.prev_motion_state is None:
+                self.prev_motion_state = self.last_state
+        
         elif new_state == "ROLLER_DECEL":#清空自动模式重置初始偏航角
             # self.auto_step = None
             self.initial_yaw = None  # 重置初始偏航角
@@ -468,101 +455,6 @@ class ServoDriveController:
         else:
             rospy.loginfo(f"无效按键: {key}")
 
-    # def distance_callback(self, msg):
-    #     """超声波距离检测回调"""
-    #     if msg.distance_a < 250:
-    #         self.sensors_status |= 0x01  # 设置传感器A状态
-    #     else:
-    #         self.sensors_status &= ~0x01
-    #     if msg.distance_b < 250:
-    #         self.sensors_status |= 0x02
-    #     else:
-    #         self.sensors_status &= ~0x02
-    #     if msg.distance_c < 250:
-    #         self.sensors_status |= 0x04
-    #     else:
-    #         self.sensors_status &= ~0x04
-    #     if msg.distance_d < 250:
-    #         self.sensors_status |= 0x08
-    #     else:
-    #         self.sensors_status &= ~0x08
-    #     # 前进边缘检测
-    #     if self.auto_mode: # 自动模式未开启，待完善
-    #         if self.current_status == self.status_list[1]:  # FORWARD
-    #             if (msg.distance_a > 250):
-    #                 self.counter_a += 1
-    #                 if self.counter_a >= self.threshold:
-    #                     # self.set_state("STOP")
-    #                     # time.sleep(1)
-    #                     self.set_state("LOADING")
-    #             else:
-    #                 self.counter_a = 0
-
-    #         if self.current_status == self.status_list[2]:  # BACKWARD
-    #             if (msg.distance_b > 250):
-    #                 self.counter_b += 1
-    #                 if self.counter_b >= self.threshold:
-    #                     # self.set_state("STOP")
-    #                     # time.sleep(1)
-    #                     #自动程序：出仓>后退>到边缘自动切换前进>到边缘切换进仓>发布完成消息>STOP停止使能。
-    #                     self.set_state("FORWARD")
-    #             else:
-    #                 self.counter_b = 0
-    #     else: # 手动模式，仅在前进与后退中切换
-    #         if self.current_status == self.status_list[1]:  # FORWARD
-    #             if (msg.distance_a > 250):
-    #                 self.counter_a += 1
-    #                 rospy.loginfo(f"counter_a: {self.counter_a}")
-    #                 rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-    #                 if self.counter_a >= self.threshold:
-    #                     self.set_state("BACKWARD")
-    #                     rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-
-    #             else:
-    #                 self.counter_a = 0
-    #         if self.current_status == self.status_list[2]:  # BACKWARD
-    #             if (msg.distance_b > 250):
-    #                 self.counter_b += 1
-    #                 rospy.loginfo(f"counter_b: {self.counter_b}")
-    #                 rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-    #                 if self.counter_b >= self.threshold:
-    #                     self.set_state("FORWARD")
-    #                     rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-
-    #             else:
-    #                 self.counter_b = 0
-    #     # 进出仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均 < 250 再切换下个状态。
-    #     if self.current_status in [self.status_list[4],self.status_list[5]] and self.side_detected:  # 边缘LOADING、UNLOADING
-    #     # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
-    #         if msg.distance_a > 250 and msg.distance_c > 250:
-    #             self.set_state("STOP")
-    #             self.side_detected = False
-    #             time.sleep(1)
-    #             #清空自动流程状态
-    #             self.complete_state = True
-    #             self.auto_step = None
-    #         elif (msg.distance_a > 250 and msg.distance_c < 250):
-    #             self.set_state("LOWSTOP")
-    #             #确保停到位
-    #             time.sleep(2)
-    #             self.set_state("STOP")
-    #             self.complete_state = False
-
-    #         elif (msg.distance_c > 250 and msg.distance_a < 250):
-    #             self.set_state("UPSTOP")
-    #             time.sleep(2)
-    #             self.set_state("STOP")
-    #             self.complete_state = False
-
-        #     # 发布两侧边缘到位的完成消息
-        # # if self.current_status == self.status_list[5] and self.side_detected:  # UNLOADING
-        # #     if (msg.distance_a > 250):
-        # #         self.set_state("STOP")
-        # #         time.sleep(1)
-        # if self.current_status == "UNLOADING":#自动模式
-        #     # 到达板子上
-        #     if (msg.distance_a < 150):
-        #         self.set_state("BACKWARD")
     def proximity_callback(self, msg):
         """4路接近开关检测回调"""
         if msg.sensor_a:
@@ -581,12 +473,21 @@ class ServoDriveController:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
+
+        #自动模式第一步 >> START
+        if self.auto_mode and self.current_status == self.status_list[3]: 
+            # 检测起始位置，进入第一步动作，有待测试
+            time.sleep(3) # 等待初始化
+            if (msg.sensor_a or msg.sensor_c): #仅一个就可以开启自动
+            # if (msg.sensor_a and msg.sensor_c):
+                self.set_state("BACKWARD")
+                self.progress = 10
+
         # 自动与手动模式下的检测
-        if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>"""LOADING""">STOP 
+        if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
                 if msg.sensor_a and msg.sensor_c:
                     self.set_state("STOP")
-                    # time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
                     self.initial_yaw = None  # 重置初始偏航角
@@ -596,91 +497,96 @@ class ServoDriveController:
                     self.set_state("LOWSTOP")
                 elif (msg.sensor_c and not msg.sensor_a):
                     self.set_state("UPSTOP")
-                    
 
-                # if (msg.sensor_a or msg.sensor_c):
-                #     self.set_state("STOP") #暂时
-                #     time.sleep(1)
-                #     #清空自动流程状态
-                #     self.complete_state = True
-                #     self.auto_step = None
-
-                #     self.initial_yaw = None  # 重置初始偏航角
-                #     #重复运行测试
-                #     self.set_state("START")
-                #     # self.has_reverse_counter = 0  # 重置后退计数器
-                    
-                    # self.progress = 100
             if self.current_status == self.status_list[2]:  # BACKWARD
                 if (msg.sensor_b or msg.sensor_d):
                     #自动程序：第一步检测接近开关到位>后退>到边缘(可加入对正程序?)自动切换前进>直到进仓>发布完成消息>STOP停止使能。
                     self.set_state("FORWARD")
                     self.progress = 60
-            if self.current_status == self.status_list[7]: #LOWSTOP 
-                 #确保停到位
-                if msg.sensor_c:
-                    self.set_state("STOP")
-                    # time.sleep(1)
-                    #清空自动流程状态
-                    self.complete_state = True
-                    self.initial_yaw = None  # 重置初始偏航角
-                    self.progress = 100
-                    self.auto_step = None
-                    self.is_lowstop = False
-                else:
-                    self.complete_state = False
-            if self.current_status == self.status_list[6]: #UPSTOP 
-                 #确保停到位
-                if msg.sensor_a:
-                    self.set_state("STOP")
-                    # time.sleep(1)
-                    #清空自动流程状态
-                    self.complete_state = True
-                    self.initial_yaw = None  # 重置初始偏航角
-                    self.progress = 100
-                    self.auto_step = None
-                    self.is_upstop = False
-                else:
-                    self.complete_state = False
+            
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
-                if (msg.sensor_a): # 无仓时不可用
-                    rospy.loginfo(f"time_a_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+                if msg.sensor_a and msg.sensor_c:
+                    self.set_state("STOP")
+                    time.sleep(1)
+                    #清空自动流程状态
+                    self.complete_state = True
+                    self.initial_yaw = None  # 重置初始偏航角
+
+                    self.progress = 100
+                    self.auto_step = None
+                elif (msg.sensor_a and not msg.sensor_c):
+                    self.set_state("LOWSTOP")
+
+                elif (msg.sensor_c and not msg.sensor_a):
+                    self.set_state("UPSTOP")
+
+                if (msg.sensor_a or msg.sensor_c): # 无仓时不可用
                     self.set_state("STOP")
                     self.progress = 0
-                    rospy.loginfo(f"time_a_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-            if self.current_status == self.status_list[2]:  # BACKWARD
-                if (msg.sensor_b):
-                    rospy.loginfo(f"time_b_start: {datetime.datetime.fromtimestamp(rospy.get_time())}")
+            elif self.current_status == self.status_list[2]:  # BACKWARD
+                if msg.sensor_b and msg.sensor_d:
                     self.set_state("STOP")
-                    self.progress = 0
-                    rospy.loginfo(f"time_b_end: {datetime.datetime.fromtimestamp(rospy.get_time())}")
-        # 进仓状态并设置执行动作，后续按需修改以设置进出仓检测,进仓判断不使用超声波、出仓判断两侧均到位再切换下个状态。
-        if self.current_status == self.status_list[4]:  # LOADING
-        # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
-            if msg.sensor_a or msg.sensor_c:
+                    time.sleep(1)
+                    #清空自动流程状态
+                    self.complete_state = True
+                    self.initial_yaw = None  # 重置初始偏航角
+
+                    self.progress = 100
+                    self.auto_step = None
+                elif (msg.sensor_b and not msg.sensor_d):
+                    self.set_state("LOWSTOP")
+
+                elif (msg.sensor_b and not msg.sensor_d):
+                    self.set_state("UPSTOP")
+        
+
+        #当单侧电机停止时，等待另一侧到位后切换状态
+        if self.current_status == self.status_list[7]: #LOWSTOP 
+                #确保停到位
+            if msg.sensor_c:
                 self.set_state("STOP")
-                time.sleep(1)
+                # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
                 self.initial_yaw = None  # 重置初始偏航角
-
-                # self.has_reverse_counter = 0  # 重置后退计数器
                 self.progress = 100
                 self.auto_step = None
-            elif (msg.sensor_a and not msg.sensor_c):
-                self.set_state("LOWSTOP")
+                self.is_lowstop = False
+            else:
+                self.complete_state = False
+        if self.current_status == self.status_list[6]: #UPSTOP 
+                #确保停到位
+            if msg.sensor_a:
+                self.set_state("STOP")
+                # time.sleep(1)
+                #清空自动流程状态
+                self.complete_state = True
+                self.initial_yaw = None  # 重置初始偏航角
+                self.progress = 100
+                self.auto_step = None
+                self.is_upstop = False
+            else:
+                self.complete_state = False
 
-            elif (msg.sensor_c and not msg.sensor_a):
-                self.set_state("UPSTOP")
+        # if self.current_status == self.status_list[4]:  # LOADING 未使用
+        # # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
+        #     if msg.sensor_a or msg.sensor_c:
+        #         self.set_state("STOP")
+        #         time.sleep(1)
+        #         #清空自动流程状态
+        #         self.complete_state = True
+        #         self.initial_yaw = None  # 重置初始偏航角
+
+        #         self.progress = 100
+        #         self.auto_step = None
+        #     elif (msg.sensor_a and not msg.sensor_c):
+        #         self.set_state("LOWSTOP")
+
+        #     elif (msg.sensor_c and not msg.sensor_a):
+        #         self.set_state("UPSTOP")
                 
-        if self.auto_mode and self.current_status == self.status_list[3]: #修改自动模式 >> START
-            # 检测起始位置，进入第一步动作，有待测试
-            time.sleep(3) # 等待初始化
-            # if (msg.sensor_a): #检测是否到位
-            if (msg.sensor_a and msg.sensor_c):
-                self.set_state("BACKWARD")
-                self.progress = 10
+        
     def pid_correction(self, current_yaw):
         """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
         error = self.target_yaw - current_yaw
@@ -763,24 +669,6 @@ class ServoDriveController:
             else:
                 if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
                     self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
-            # if -5 < self.imu_yaw < -2:
-            #     # time.sleep(1.0)
-            #     rospy.loginfo(f"last_L_speed: {self.last_left_speed}")
-            #     rospy.loginfo(f"last_R_speed: {self.last_right_speed}")
-            #     if self.current_status == "FORWARD":
-            #         self.set_state("UPSTOP")
-            #         self.is_upstop = True
-            #     else:
-            #         self.set_state("LOWSTOP")
-            #         self.is_lowstop = True
-            # if 2 < self.imu_yaw < 5:
-            #     # time.sleep(1.0)
-            #     if self.current_status == "FORWARD":
-            #         self.set_state("LOWSTOP")
-            #         self.is_lowstop = True
-            #     else:
-            #         self.set_state("UPSTOP")
-            #         self.is_upstop = True                
             
             # 实时发布状态
             self.current_velocity_up = left_speed
@@ -890,12 +778,6 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-            # if self.is_upstop and abs(self.imu_yaw) < 1:
-            #     if self.prev_motion_state:
-            #         # 保存要恢复的状态，避免在set_state中被重置
-            #         restore_state = self.prev_motion_state
-            #         self.prev_motion_state = None  # 先重置，避免在set_state中冲突
-            #         self.set_state(restore_state)
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed               
@@ -914,13 +796,6 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
            
-            # if self.is_lowstop and abs(self.imu_yaw) < 1:
-            #     if self.prev_motion_state:
-            #         # 保存要恢复的状态，避免在set_state中被重置
-            #         restore_state = self.prev_motion_state
-            #         self.prev_motion_state = None  # 先重置，避免在set_state中冲突
-            #         self.set_state(restore_state)
-                # self.is_lowstop = False
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed
@@ -953,29 +828,29 @@ class ServoDriveController:
             config = self.status_config["START"]
             
 
-        # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测
-        elif self.current_status in ["LOADING", "UNLOADING"]:
-            correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
-            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            if (self.last_left_speed != left_speed or
-                self.last_right_speed != right_speed or
-                self.last_brush_speed != brush_speed):
-                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
+        # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测 未使用
+        # elif self.current_status in ["LOADING", "UNLOADING"]:
+        #     correction = self.pid_correction(self.imu_yaw) * rate
+        #     left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
+        #     right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+        #     brush_speed = self.status_config[self.current_status]["velocity_brush"]
+        #     if (self.last_left_speed != left_speed or
+        #         self.last_right_speed != right_speed or
+        #         self.last_brush_speed != brush_speed):
+        #         rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+        #         rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
                 
-                self.set_target_velocity(3, left_speed)
-                self.set_target_velocity(2, right_speed)
-                self.set_target_velocity(4, brush_speed)
-                self.last_left_speed = left_speed
-                self.last_right_speed = right_speed
-                self.last_brush_speed = brush_speed
+        #         self.set_target_velocity(3, left_speed)
+        #         self.set_target_velocity(2, right_speed)
+        #         self.set_target_velocity(4, brush_speed)
+        #         self.last_left_speed = left_speed
+        #         self.last_right_speed = right_speed
+        #         self.last_brush_speed = brush_speed
 
-            # 实时发布状态
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed
+        #     # 实时发布状态
+        #     self.current_velocity_up = left_speed
+        #     self.current_velocity_low = right_speed
+        #     self.current_velocity_brush = brush_speed
     
     def delayed_publish_freq_switch(self, delay_sec=3):
         # 延时后切换到低频率
@@ -1026,15 +901,13 @@ def main():
     # 订阅速度命令话题
     # rospy.Subscriber("distance_data", Distances, lambda msg: controller.distance_callback(msg))
     rospy.Subscriber("proximity_sensor_data", Sensors, lambda msg: controller.proximity_callback(msg))
-    #通过检测按键修改运行状态
+    # 通过检测按键修改运行状态
     # 启动键盘监听线程
     t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
     t.start()
     try:
     # 每0.1秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.1), controller.execute_state)
-        # 每0.5秒发布一次状态
-        # rospy.Timer(rospy.Duration(0.5), lambda event: controller.publish_state())
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")
