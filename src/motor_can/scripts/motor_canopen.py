@@ -878,7 +878,7 @@ class ServoDriveController:
         # 4. UPSTOP/LOWSTOP状态：IMU矫正+保持切换前速度
         elif self.current_status == "UPSTOP":
             left_speed = 0 # 上电机停
-            right_speed = int(17000 * 0.4)  # 右轮保持切换前速度
+            right_speed = int(17000 * 1)  # 右轮保持切换前速度
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -900,7 +900,7 @@ class ServoDriveController:
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
-            left_speed = int(-17000 * 0.4) # 上电机保持切换前速度 
+            left_speed = int(-17000 * 1) # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
