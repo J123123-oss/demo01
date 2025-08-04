@@ -1,16 +1,17 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
-<arg name="robot_ID" default="001" />
+<!-- <arg name="robot_ID" default="001" /> -->
+<arg name="robot_ID" default="GF-TJ-060" />
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
     </node>
     <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
-        <param name="broker" value="121.40.57.48"/>
-        <param name="port" value="8883"/>
-        <param name="user" value="gf-mounted"/>
-        <param name="passward" value="20230810"/>
-        <param name="topic_status" value="robot/$(arg robot_ID)/status"/>
-        <param name="topic_cmd" value="robot/$(arg robot_ID)/cmd"/>
-        <param name="client_id" value="python-mqtt-client-$(arg robot_ID)"/>
+        <param name="~broker" value="121.40.57.48"/>
+        <param name="~port" value="8883"/>
+        <param name="~user" value="gf-mounted"/>
+        <param name="~password" value="20230810"/>
+        <param name="~topic_status" value="robot/$(arg robot_ID)/status"/>
+        <param name="~topic_cmd" value="robot/$(arg robot_ID)/cmd"/>
+        <param name="~client_id" value="python-mqtt-client-$(arg robot_ID)"/>
     </node>
     <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen" />
     <!-- <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen"> -->

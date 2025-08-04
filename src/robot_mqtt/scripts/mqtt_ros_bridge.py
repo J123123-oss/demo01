@@ -7,7 +7,7 @@ from std_msgs.msg import String
 import json
 
 class MQTTClient:
-    def __init__(self, broker, port, user, passward, topic_status, topic_cmd, client_id, ca_cert=None):
+    def __init__(self, broker, port, user, password, topic_status, topic_cmd, client_id, ca_cert=None):
         """
         Initialize MQTT Client
         
@@ -21,7 +21,7 @@ class MQTTClient:
         self.broker = broker
         self.port = port
         self.user = user
-        self.passward = passward
+        self.password = str(password)
         self.topic_status = topic_status  # ROS状态发布到MQTT
         self.topic_cmd = topic_cmd        # MQTT控制指令下发到ROS
         self.client_id = client_id
@@ -109,7 +109,7 @@ class MQTTClient:
         
         try:
             # 设置用户名和密码
-            self.client.username_pw_set(self.user, self.passward)
+            self.client.username_pw_set(self.user, self.password)
         
             self.client.connect(self.broker, self.port, keepalive)
             print(f"✅ 连接成功!")
@@ -124,7 +124,7 @@ class MQTTClient:
     def start(self):
         """Start the MQTT client"""
         # 启动ROS节点
-        rospy.init_node("mqtt_ros_bridge", anonymous=True)
+        # rospy.init_node("mqtt_ros_bridge", anonymous=True)
         # 订阅robot_state话题，发布到MQTT状态主题
         rospy.Subscriber("robot_state", String, self.ros_robot_state_callback)
         self.ros_cmd_pub = rospy.Publisher("robot_cmd", String, queue_size=10)
@@ -156,19 +156,20 @@ class MQTTClient:
 
 if __name__ == "__main__":
     # Configuration
+    rospy.init_node("mqtt_ros_bridge")  # 确保节点名称正确
+
     config = {
-        # "broker": "129.211.16.114",   Old
-        # "port": 8883,               
         "broker": rospy.get_param("~broker", "121.40.57.48"),
-        "port": rospy.get_param("~port", 8883),
+        "port": int(rospy.get_param("port", 8883)),
         "user": rospy.get_param("~user", "gf-mounted"),
-        "passward": rospy.get_param("~passward", "20230810"),
+        "password": rospy.get_param("~password", "20230810"),
         "topic_status": rospy.get_param("~topic_status", "robot/001/status"),
         "topic_cmd": rospy.get_param("~topic_cmd", "robot/001/cmd"),
-        "client_id": rospy.get_param("~client_id", "python-mqtt-client-v2"),
+        "client_id": rospy.get_param("~client_id", "python-mqtt-client-ID"),
         "ca_cert": None
     }
     
+    rospy.loginfo(f"Final config: {config}")
     # Create and start client
     mqtt_client = MQTTClient(**config)
     if mqtt_client.connect():
