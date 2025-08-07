@@ -53,6 +53,7 @@ add_message_files(
   Distances.msg
   INSPVAE.msg
   Sensors.msg
+  BatteryStatus.msg  # 自定义电池状态消息
 
   # Message2.msg
 )

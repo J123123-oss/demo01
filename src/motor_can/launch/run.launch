@@ -27,6 +27,6 @@
     <!-- 控制电缸节点 -->
     <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" />
     <!-- 电池状态节点 -->
-    <node pkg="serial_comms" type="battery.py" name="battery" />
+    <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" />
 
 </launch>

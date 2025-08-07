@@ -9,6 +9,7 @@ from std_msgs.msg import String, Int8, Float32, Float32MultiArray
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
+from serial_comms.msg import BatteryStatus  # 确保导入正确的消息类型
 import threading
 import sys
 import select
@@ -164,8 +165,7 @@ class ServoDriveController:
         self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
-        rospy.Subscriber('/remaining_battery_percentage', Float32, self.battery_callback)
-        rospy.Subscriber('/battery_temperatures', Float32MultiArray, self.battery_temperatures_callback)
+        rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
 
 
 
@@ -358,13 +358,11 @@ class ServoDriveController:
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
-    def battery_callback(self, msg):
+    def battery_status_callback(self, msg):
 
-        self.battery_remaining = msg.data
+        self.battery_remaining = msg.batttery_remaining  # 电池百分比
+        self.battery_temperatures = msg.temperatures  # 电池温度，共4个
 
-    def battery_temperatures_callback(self, msg):
-        
-        self.battery_temperatures = msg.data
 
     def send_command(self, motor_id, command_data):
         frame_id = 0x600 + motor_id
