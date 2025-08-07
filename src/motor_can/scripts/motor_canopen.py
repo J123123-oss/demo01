@@ -296,7 +296,8 @@ class ServoDriveController:
         """发布机器人状态信息，包含速度和状态"""
         state_msg = {
             "status": self.current_status,
-            "battery": 78,
+            "battery": self.battery_remaining, # 电池百分比,
+            "battery_temperatures": self.battery_temperatures, # 电池温度，共4个
             "progress": self.progress,
             "imu_yaw": self.imu_yaw,  # IMU偏航角
             "velocity_up": self.current_velocity_up / rate,  # 单位转换为RPM
@@ -313,8 +314,6 @@ class ServoDriveController:
             "auto_mode": self.auto_mode, # 自动模式开关,默认开
             # "auto_step": self.auto_step, # 当前自动程序所在状态
 
-            "battery_remaining": self.battery_remaining, # 电池百分比
-            "battery_temperatures": self.battery_temperatures, # 电池温度，共4个
 
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
         }
