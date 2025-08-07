@@ -83,7 +83,7 @@ class BatteryMonitor:
                 index = 22 + i * 2
                 raw_temp = (data[index] << 8) | data[index + 1]
                 # 转换为摄氏度: T = (raw_value - 2731) / 10.0
-                temperature = (raw_temp - 2731) / 10.0
+                temperature = (raw_temp - 2731) / 10.0  
                 status_msg.temperatures.append(temperature)
             
             # 发布完整状态消息
