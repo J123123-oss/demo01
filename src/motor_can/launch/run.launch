@@ -26,5 +26,7 @@
     <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" />
     <!-- 控制电缸节点 -->
     <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" />
+    <!-- 电池状态节点 -->
+    <node pkg="serial_comms" type="battery.py" name="battery" />
 
 </launch>

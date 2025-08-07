@@ -5,7 +5,7 @@ import time
 import yaml
 import rospy
 import json
-from std_msgs.msg import String, Int8
+from std_msgs.msg import String, Int8, Float32, Float32MultiArray
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
@@ -155,12 +155,20 @@ class ServoDriveController:
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
+
         self.progress = 0   # 进度百分比，0-100
+        self.battery_remaining = None # 电池百分比
+        self.battery_temperatures = [] # 电池温度，共4个
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
+        self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
-        self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
+        rospy.Subscriber('/remaining_battery_percentage', Float32, self.battery_callback)
+        rospy.Subscriber('/battery_temperatures', Float32MultiArray, self.battery_temperatures_callback)
+
+
+
 
     def set_state(self, new_state):
         if new_state not in self.status_config:
@@ -304,6 +312,10 @@ class ServoDriveController:
             "complete_state":self.complete_state, # 任务完成状态
             "auto_mode": self.auto_mode, # 自动模式开关,默认开
             # "auto_step": self.auto_step, # 当前自动程序所在状态
+
+            "battery_remaining": self.battery_remaining, # 电池百分比
+            "battery_temperatures": self.battery_temperatures, # 电池温度，共4个
+
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
         }
         self.state_pub.publish(json.dumps(state_msg))
@@ -347,6 +359,13 @@ class ServoDriveController:
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
+    def battery_callback(self, msg):
+
+        self.battery_remaining = msg.data
+
+    def battery_temperatures_callback(self, msg):
+        
+        self.battery_temperatures = msg.data
 
     def send_command(self, motor_id, command_data):
         frame_id = 0x600 + motor_id
