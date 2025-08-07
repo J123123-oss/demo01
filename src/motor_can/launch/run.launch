@@ -24,5 +24,7 @@
     <!-- <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor"/> -->
     <!-- 接近开关使用CAN协议 -->
     <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" />
+    <!-- 控制电缸节点 -->
+    <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" />
 
 </launch>

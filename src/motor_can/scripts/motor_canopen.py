@@ -5,7 +5,7 @@ import time
 import yaml
 import rospy
 import json
-from std_msgs.msg import String
+from std_msgs.msg import String, Int8
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
@@ -160,6 +160,7 @@ class ServoDriveController:
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
+        self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
 
     def set_state(self, new_state):
         if new_state not in self.status_config:
@@ -493,6 +494,12 @@ class ServoDriveController:
                     self.initial_yaw = None  # 重置初始偏航角
                     self.progress = 100
                     self.auto_step = None
+                    #电缸下降，正反转待定
+                    rospy.loginfo("电机向下转动，锁止")
+                    self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
+                    time.sleep(10)
+                    rospy.loginfo("电机向前转动")
+                    self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
                 elif (msg.sensor_c and not msg.sensor_a):
@@ -515,6 +522,13 @@ class ServoDriveController:
 
                     self.progress = 100
                     self.auto_step = None
+                    #电缸下降，正反转待定
+                    rospy.loginfo("电机向下转动，锁止")
+                    self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
+                    time.sleep(10)
+                    rospy.loginfo("电机向前转动")
+                    self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
+
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
 
@@ -553,6 +567,12 @@ class ServoDriveController:
                 self.progress = 100
                 self.auto_step = None
                 self.is_lowstop = False
+                #电缸下降，正反转待定
+                rospy.loginfo("电机向下转动，锁止")
+                self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
+                time.sleep(10)
+                rospy.loginfo("电机向前转动")
+                self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
             else:
                 self.complete_state = False
         if self.current_status == self.status_list[6]: #UPSTOP 
@@ -566,6 +586,12 @@ class ServoDriveController:
                 self.progress = 100
                 self.auto_step = None
                 self.is_upstop = False
+                #电缸下降，正反转待定
+                rospy.loginfo("电机向下转动，锁止")
+                self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
+                time.sleep(10)
+                rospy.loginfo("电机向前转动")
+                self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
             else:
                 self.complete_state = False
 
@@ -612,6 +638,10 @@ class ServoDriveController:
             config = self.status_config["START"]
 
             rospy.loginfo("设置速度模式，初始化电机...")
+            #电缸抬起，正反转待定
+            rospy.loginfo("电机向后转动")
+            self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
+            time.sleep(10)
             config = self.load_config()       
 
             for motor in config["motors"]:
