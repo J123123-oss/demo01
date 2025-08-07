@@ -61,7 +61,7 @@ class MotorController:
             m2_fwd, m2_rev = self.pin_map['motor2']
             
             # 设置两个电机转动方向
-            if direction == -1:    # 反转
+            if direction == -1:    # 正转，放下去
                 # 电机1
                 subprocess.run(['gpio', 'write', str(m1_fwd), '1'], check=True)
                 subprocess.run(['gpio', 'write', str(m1_rev), '0'], check=True)
@@ -69,7 +69,7 @@ class MotorController:
                 subprocess.run(['gpio', 'write', str(m2_fwd), '1'], check=True)
                 subprocess.run(['gpio', 'write', str(m2_rev), '0'], check=True)
                 rospy.loginfo("双电机反转")
-            elif direction == 1: # 反转
+            elif direction == 1: # 反转，抬起来
                 # 电机1
                 subprocess.run(['gpio', 'write', str(m1_fwd), '0'], check=True)
                 subprocess.run(['gpio', 'write', str(m1_rev), '1'], check=True)

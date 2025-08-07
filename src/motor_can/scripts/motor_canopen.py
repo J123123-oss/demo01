@@ -496,8 +496,8 @@ class ServoDriveController:
                     self.auto_step = None
                     #电缸下降，正反转待定
                     rospy.loginfo("电机向下转动，锁止")
-                    self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
-                    time.sleep(10)
+                    self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
+                    time.sleep(20)
                     rospy.loginfo("电机向前转动")
                     self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
                 elif (msg.sensor_a and not msg.sensor_c):
@@ -524,8 +524,8 @@ class ServoDriveController:
                     self.auto_step = None
                     #电缸下降，正反转待定
                     rospy.loginfo("电机向下转动，锁止")
-                    self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
-                    time.sleep(10)
+                    self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
+                    time.sleep(20)
                     rospy.loginfo("电机向前转动")
                     self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
 
@@ -569,8 +569,8 @@ class ServoDriveController:
                 self.is_lowstop = False
                 #电缸下降，正反转待定
                 rospy.loginfo("电机向下转动，锁止")
-                self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
-                time.sleep(10)
+                self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
+                time.sleep(20)
                 rospy.loginfo("电机向前转动")
                 self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
             else:
@@ -589,7 +589,7 @@ class ServoDriveController:
                 #电缸下降，正反转待定
                 rospy.loginfo("电机向下转动，锁止")
                 self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
-                time.sleep(10)
+                time.sleep(20)
                 rospy.loginfo("电机向前转动")
                 self.motor_cmd_pub.publish(Int8(data=0))   # 电缸脱机
             else:
@@ -638,10 +638,10 @@ class ServoDriveController:
             config = self.status_config["START"]
 
             rospy.loginfo("设置速度模式，初始化电机...")
-            #电缸抬起，正反转待定
+            #电缸抬起，发送"1"
             rospy.loginfo("电机向后转动")
-            self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
-            time.sleep(10)
+            self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
+            time.sleep(20)
             config = self.load_config()       
 
             for motor in config["motors"]:
