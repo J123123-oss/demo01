@@ -1,7 +1,7 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
-<!-- <arg name="robot_ID" default="001" /> -->
-<arg name="robot_ID" default="GF-TJ-060" />
+<arg name="robot_ID" default="001" />
+<!-- <arg name="robot_ID" default="GF-TJ-060" /> -->
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
     </node>
     <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >

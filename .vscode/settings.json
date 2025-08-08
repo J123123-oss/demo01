@@ -6,5 +6,6 @@
         "/opt/ros/noetic/lib/python3/dist-packages"
     ],
     "python-envs.defaultEnvManager": "ms-python.python:system",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "cmake.sourceDirectory": "/home/orangepi/demo01/src/motor_can"
 }

@@ -1,3 +1,2 @@
 #
-KERNEL=="ttyUSB*" ,KERNELS=="3-1" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="IMU"
-KERNEL=="ttyUSB*" ,KERNELS=="4-1" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="ProximitySensor"
+KERNEL=="ttyACM*" ,ATTRS{idProduct}=="55d3" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="IMU"
