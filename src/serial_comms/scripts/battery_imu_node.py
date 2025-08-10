@@ -151,7 +151,7 @@ class BatteryAndIMUNode:
             recv_crc = frame[-2:]
             calc_crc = self.calculate_crc(frame[:-2])
             if recv_crc != calc_crc:
-                rospy.logwarn("IMU CRC校验失败")
+                # rospy.logwarn("IMU CRC校验失败")
                 return None
             
             # 解析Yaw角度
