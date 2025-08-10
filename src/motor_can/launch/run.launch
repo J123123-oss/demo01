@@ -13,7 +13,7 @@
         <param name="~topic_cmd" value="robot/$(arg robot_ID)/cmd"/>
         <param name="~client_id" value="python-mqtt-client-$(arg robot_ID)"/>
     </node>
-    <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" output="screen" />
+    <node pkg="serial_comms" type="combined_imu_battery_node.py" name="combined_imu_battery_node"  />
     <!-- <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen"> -->
         <!-- <param name="port" value="/dev/SENSOR0"/> -->
         <!-- <param name="baudrate" value="115200"/> -->
@@ -27,6 +27,6 @@
     <!-- 控制电缸节点 -->
     <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" />
     <!-- 电池状态节点 -->
-    <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" />
+    <!-- <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" output="screen" /> -->
 
 </launch>

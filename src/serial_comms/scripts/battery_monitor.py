@@ -76,14 +76,17 @@ class BatteryMonitor:
             
             # 9. 电量百分比 (1字节)
             status_msg.batttery_remaining = data[19]  # 0-100%
+            print("status_msg.batttery_remaining:",status_msg.batttery_remaining)
             
             # 10. 温度数据解析
-            ntc_count = data[21]  # 温度传感器数量
+            ntc_count = data[22]  # 温度传感器数量
             for i in range(ntc_count):
-                index = 22 + i * 2
+                index = 23 + i * 2
                 raw_temp = (data[index] << 8) | data[index + 1]
                 # 转换为摄氏度: T = (raw_value - 2731) / 10.0
-                temperature = (raw_temp - 2731) / 10.0  
+                temperature = (raw_temp - 2731) / 10.0
+                #保留一位小数
+                temperature = round(temperature, 1)  
                 status_msg.temperatures.append(temperature)
             
             # 发布完整状态消息
