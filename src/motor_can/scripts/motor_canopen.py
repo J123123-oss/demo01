@@ -59,23 +59,23 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": -250 * rate,
-                "velocity_low": 250 * rate,
+                "velocity_up": 250 * rate,
+                "velocity_low": -250 * rate,
                 "velocity_brush": 1500 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": 250 * rate,
-                "velocity_low": -250 * rate,
+                "velocity_up": -250 * rate,
+                "velocity_low": 250 * rate,
                 "velocity_brush": -1500 * rate
             },
             "LOADING": {
-                "velocity_up": -250 *rate,
-                "velocity_low": 250 *rate,
+                "velocity_up": 250 *rate,
+                "velocity_low": -250 *rate,
                 "velocity_brush": 0
             },
             "UNLOADING":{
-                "velocity_up": 250 *rate,
-                "velocity_low": -250 *rate,
+                "velocity_up": -250 *rate,
+                "velocity_low": 250 *rate,
                 "velocity_brush": 0
             },
             "UPSTOP":{
@@ -766,10 +766,10 @@ class ServoDriveController:
                 # 使用更平滑的速度调整方式
                 if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                 # 根据偏差方向调整轮速
-                    right_speed = left_speed = int (15000 * 0.6 * self.flag)  # 基础后退速度+校正
+                    right_speed = left_speed = int (-15000 * 0.6 * self.flag)  # 基础后退速度+校正
                 else:
                     # 角度接近时减速
-                    right_speed = left_speed = int(15000 * 0.2 * self.flag)
+                    right_speed = left_speed = int(-15000 * 0.2 * self.flag)
                 right_speed = max(min(right_speed, 17000), -17000)
                 left_speed = max(min(left_speed, 17000), -17000)
                 brush_speed = self.last_brush_speed
@@ -812,7 +812,7 @@ class ServoDriveController:
         # 4. UPSTOP/LOWSTOP状态：IMU矫正+保持切换前速度
         elif self.current_status == "UPSTOP":
             left_speed = 0 # 上电机停
-            right_speed = int(17000 * 1)  # 右轮保持切换前速度
+            right_speed = int(-17000 * 1)  # 右轮保持切换前速度
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -828,7 +828,7 @@ class ServoDriveController:
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
-            left_speed = int(-17000 * 1) # 上电机保持切换前速度 
+            left_speed = int(17000 * 1) # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
