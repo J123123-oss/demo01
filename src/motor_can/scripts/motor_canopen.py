@@ -61,12 +61,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": 250 * rate,
                 "velocity_low": -250 * rate,
-                "velocity_brush": 1500 * rate
+                "velocity_brush": 1000 * rate
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -250 * rate,
                 "velocity_low": 250 * rate,
-                "velocity_brush": -1500 * rate
+                "velocity_brush": -1000 * rate
             },
             "LOADING": {
                 "velocity_up": 250 *rate,
@@ -201,9 +201,11 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
-        if new_state in[ "FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
-            self.prev_motion_state = self.last_state
-            # rospy.loginfo(f"保存的上个状态: {self.prev_motion_state}")
+        # 进入运动状态时，只有当前不是REVERSE状态才更新prev_motion_state
+        if new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
+            if self.current_status != "REVERSE":  # 添加这个条件
+                self.prev_motion_state = new_state  # 保存当前要进入的状态，而不是last_state
+            # rospy.loginfo(f"保存的运动状态: {self.prev_motion_state}")
         
         # 进入反向调整、单侧停止时，记录当前运动状态
         if new_state in ["REVERSE", "UPSTOP", "LOWSTOP"]:
@@ -658,7 +660,7 @@ class ServoDriveController:
             rospy.loginfo("电缸抬起")
             self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
             # time.sleep(20)
-            config = self.load_config()       
+            config = self.load_config()         
 
             for motor in config["motors"]:
                 motor_id = motor.get("id")
@@ -680,9 +682,9 @@ class ServoDriveController:
             self.enable_drive_flag = False
             rospy.loginfo("速度模式初始化完成")
             # 初始化完成后自动切换到auto_step
-            if self.auto_mode and self.auto_step:
-                rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
-                self.set_state(self.auto_step)
+            # if self.auto_mode and self.auto_step:
+            #     rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
+            #     self.set_state(self.auto_step)
             return
 
         # 2. FORWARD/BACKWARD状态：IMU矫正
@@ -707,14 +709,15 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            # 检查是否需要进入后退矫正状态
+            # 检查是否需要进入后退矫正状态(自动模式下才检测)
             # rospy.loginfo(f"在execute中的：{self.prev_motion_state}")
-            if self.prev_motion_state != "REVERSE":
-                if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
-                    self.set_state("REVERSE")  # 进入后退矫正状态
-            else:
-                if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
-                    self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
+            if self.auto_mode:
+                if self.prev_motion_state != "REVERSE":
+                    if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
+                        self.set_state("REVERSE")  # 进入后退矫正状态
+                else:
+                    if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
+                        self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
             # 实时发布状态
             self.current_velocity_up = left_speed
@@ -723,7 +726,7 @@ class ServoDriveController:
 
         # 3. 反向调整状态
         elif self.current_status == "REVERSE":
-            
+            print("self.prev_motion_state:",self.prev_motion_state)
             # 执行后退矫正
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1  # 标记后退次数
