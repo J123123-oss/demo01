@@ -711,13 +711,13 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
             # 检查是否需要进入后退矫正状态(自动模式下才检测)
             # rospy.loginfo(f"在execute中的：{self.prev_motion_state}")
-            if self.auto_mode:
-                if self.prev_motion_state != "REVERSE":
-                    if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
-                        self.set_state("REVERSE")  # 进入后退矫正状态
-                else:
-                    if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
-                        self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
+            # if self.auto_mode:
+            if self.prev_motion_state != "REVERSE":
+                if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
+                    self.set_state("REVERSE")  # 进入后退矫正状态
+            else:
+                if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
+                    self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
             # 实时发布状态
             self.current_velocity_up = left_speed
