@@ -30,6 +30,13 @@ class ServoDriveController:
         self.motor_driver =True
         self.base_speed = 17000 * 0.8  #设置后退基础速度值
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
+        # 计时阶段参数
+        self.reversed_start_time = None  # 记录首次检测到偏差的时间
+        self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
+        self.start_timer = None
+        self.start_time = 0
+        self.elevator_stage = 0  # 电缸升降阶段: 0=待抬升,1=抬升中,2=抬升完成
+        self.elevator_start_time = 0
 
         #设置状态列表
         self.status_list = [
@@ -193,6 +200,7 @@ class ServoDriveController:
         # STOP时3秒后，降低发布频率为半小时一次（30min*60=1800秒）    
         if new_state == "STOP":
             # self.auto_mode = False
+            self.elevator_stage = 0
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
@@ -206,7 +214,7 @@ class ServoDriveController:
             if self.current_status != "REVERSE":  # 添加这个条件
                 self.prev_motion_state = new_state  # 保存当前要进入的状态，而不是last_state
             # rospy.loginfo(f"保存的运动状态: {self.prev_motion_state}")
-        
+         
         # 进入反向调整、单侧停止时，记录当前运动状态
         if new_state in ["REVERSE", "UPSTOP", "LOWSTOP"]:
             if self.prev_motion_state is None:
@@ -214,7 +222,8 @@ class ServoDriveController:
         
         elif new_state == "ROLLER_DECEL":#清空自动模式重置初始偏航角
             # self.auto_step = None
-            self.initial_yaw = None  # 重置初始偏航角
+            self.initial_yaw = None  # 重置初始偏航角与自动模式记录
+            self.auto_step = None
         elif new_state == "ROLLER_ACCEL": #切换手动与自动模式
             if( self.count % 2 ):
                 self.auto_mode = False
@@ -459,6 +468,7 @@ class ServoDriveController:
             'f': "FORWARD",
             'b': "BACKWARD",
             'a': "START",  # 速度模式初始化并使能
+            'r': "REVERSE",
             'l': "LOADING",
             'u': "UNLOADING",
             '1': "UPSTOP",
@@ -466,7 +476,7 @@ class ServoDriveController:
         }
         if key in key_mapping:
             if key != 'a':
-                self.auto_mode = False
+                self.auto_mode = True
             else:
                 self.auto_mode = True
             self.set_state(key_mapping[key])
@@ -494,13 +504,16 @@ class ServoDriveController:
             self.sensors_status &= ~0x08
 
         #自动模式第一步 >> START
-        if self.auto_mode and self.current_status == self.status_list[3]: 
+        if self.auto_mode and self.current_status == "START": 
             # 检测起始位置，进入第一步动作，有待测试
-            time.sleep(20) # 等待初始化
-            if (msg.sensor_a or msg.sensor_c): #仅一个就可以开启自动
-            # if (msg.sensor_a and msg.sensor_c):
-                self.set_state("BACKWARD")
-                self.progress = 10
+            if self.elevator_stage == 2:
+                if (msg.sensor_a or msg.sensor_c): #仅一个就可以开启自动
+                # if (msg.sensor_a and msg.sensor_c):
+                    self.set_state("BACKWARD")
+                    self.progress = 10
+                else:
+                    rospy.logwarn("未检测到起始位置，保持等待...")
+            
 
         # 自动与手动模式下的检测
         if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>STOP 
@@ -653,38 +666,67 @@ class ServoDriveController:
         # 实时根据当前状态和IMU矫正左右轮速度
         # 1. START状态：速度模式初始化电机
         if self.enable_drive_flag and self.current_status == "START":
-            config = self.status_config["START"]
-
-            rospy.loginfo("设置速度模式，初始化电机...")
-            #电缸抬起，发送"1"
-            rospy.loginfo("电缸抬起")
-            self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
-            # time.sleep(20)
-            config = self.load_config()         
-
-            for motor in config["motors"]:
-                motor_id = motor.get("id")
-                velocity = motor.get("velocity")
-                acceleration = motor.get("acceleration")
-                deceleration = motor.get("deceleration")
-                if None in (motor_id, velocity, acceleration, deceleration):
-                    rospy.logwarn(f"跳过无效配置: {motor}")
-                    continue
-                try:
-                    self.configure_motor(
-                        motor_id=motor_id,
-                        velocity=int(velocity*rate),
-                        acceleration=int(acceleration*rate),
-                        deceleration=int(deceleration*rate)
-                    )
-                except Exception as e:
-                    rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
-            self.enable_drive_flag = False
-            rospy.loginfo("速度模式初始化完成")
+            # 阶段0: 开始抬升电缸
+            if self.elevator_stage == 0:
+                rospy.loginfo("电缸抬起...")
+                self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
+                self.elevator_start_time = rospy.get_time()  # 记录抬升开始时间
+                self.elevator_stage = 1  # 进入抬升中阶段
+                
+            # 阶段1: 等待电缸完成抬升(非阻塞检查)
+            elif self.elevator_stage == 1:
+                elapsed = rospy.get_time() - self.elevator_start_time
+                
+                # 等待20秒完成电缸抬升
+                if elapsed >= 20:
+                    rospy.loginfo("开始配置电机速度模式...")
+                    config = self.load_config()
+                    
+                    for motor in config["motors"]:
+                        motor_id = motor.get("id")
+                        velocity = motor.get("velocity")
+                        acceleration = motor.get("acceleration")
+                        deceleration = motor.get("deceleration")
+                        if None in (motor_id, velocity, acceleration, deceleration):
+                            rospy.logwarn(f"跳过无效配置: {motor}")
+                            continue
+                        try:
+                            self.configure_motor(
+                                motor_id=motor_id,
+                                velocity=int(velocity*rate),
+                                acceleration=int(acceleration*rate),
+                                deceleration=int(deceleration*rate)
+                            )
+                        except Exception as e:
+                            rospy.logerr(f"配置电机 {motor_id} 时出错: {e}")
+                    
+                    rospy.loginfo("速度模式初始化完成")
+                    self.enable_drive_flag = False
+                    self.elevator_stage = 2  # 完成抬升和初始化
+                    
+                    # 启动20秒等待检查计时器(代替sleep)
+                    self.start_time = rospy.get_time()
+                    
+                else:
+                    # 实时显示剩余时间
+                    remaining = max(0, 20 - elapsed)
+                    rospy.loginfo(f"等待电缸抬起: 还剩 {remaining:.1f}秒")
+        
+        # 阶段2: 等待20秒后开始自动模式第一步
+        # elif self.elevator_stage == 2:
+            # elapsed = rospy.get_time() - self.start_time
+            
+            # 实时显示剩余时间
+            # if elapsed < 20:
+            #     remaining = max(0, 20 - elapsed)
+            #     rospy.loginfo(f"等待系统初始化完成: 还剩 {remaining:.1f}秒")
+            #     return
+            
+           
             # 初始化完成后自动切换到auto_step
-            # if self.auto_mode and self.auto_step:
-            #     rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
-            #     self.set_state(self.auto_step)
+            if self.auto_mode and self.auto_step:
+                rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
+                self.set_state(self.auto_step)
             return
 
         # 2. FORWARD/BACKWARD状态：IMU矫正
@@ -709,16 +751,39 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-            # 检查是否需要进入后退矫正状态(自动模式下才检测)
+            # 检查是否需要进入后退矫正状态(根据实际情况调整角度)
             # rospy.loginfo(f"在execute中的：{self.prev_motion_state}")
             # if self.auto_mode:
-            if self.prev_motion_state != "REVERSE":
-                if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
-                    self.set_state("REVERSE")  # 进入后退矫正状态
-            else:
-                if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
-                    self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
+            # if self.prev_motion_state != "REVERSE":
+            #     if -5 < self.imu_yaw < -2 or 2 < self.imu_yaw < 5:
+            #         self.set_state("REVERSE")  # 进入后退矫正状态
+            # else:
+            #     if -5 < self.imu_yaw < -3 or 3 < self.imu_yaw < 5:
+            #         self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
+
+            angle_condition_met = (-5 < self.imu_yaw < -2.5 or 2.5 < self.imu_yaw < 5)
+        
+            if angle_condition_met:
+                # 第一次检测到角度问题时记录时间
+                if self.reversed_start_time is None:
+                    self.reversed_start_time = rospy.get_time()
+                    rospy.logwarn(f"检测到角度偏差: {self.imu_yaw:.2f}度，开始计时...")
+                
+                # 检查是否已经达到时间阈值
+                elapsed = rospy.get_time() - self.reversed_start_time
+                if elapsed >= self.REVERSE_TIME_THRESHOLD:
+                    # 满足3秒条件，触发REVERSE状态
+                    rospy.logwarn(f"角度偏差已持续{elapsed:.1f}秒，进入REVERSE状态")
+                    self.set_state("REVERSE")
+                    self.reversed_start_time = None  # 重置计时器
+            else:
+                # 角度偏差不满足条件，重置计时器
+                if self.reversed_start_time is not None:
+                    rospy.loginfo(f"角度偏差消失({self.imu_yaw:.2f}°)，重置计时器")
+                    self.reversed_start_time = None
+
+
             # 实时发布状态
             self.current_velocity_up = left_speed
             self.current_velocity_low = right_speed
@@ -727,6 +792,7 @@ class ServoDriveController:
         # 3. 反向调整状态
         elif self.current_status == "REVERSE":
             print("self.prev_motion_state:",self.prev_motion_state)
+            self.reversed_start_time = None
             # 执行后退矫正
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1  # 标记后退次数

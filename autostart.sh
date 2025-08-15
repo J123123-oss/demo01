@@ -1,8 +1,10 @@
 #!/bin/bash
 
-[ -e /dev/ttyACM0 ] && sudo chmod 777 /dev/IMU
+# [ -e /dev/ttyACM0 ] && sudo chmod 666 /dev/IMU
+# [ -e /dev/ttyACM1] && sudo chmod 666 /dev/CAN0
+
+
 # [ -e /dev/ttyUSB1 ] && sudo chmod 777 /dev/ProximitySensor
-[ -e /dev/ttyUSB0 ] && sudo chmod 777 /dev/CAN0
 # [ -e /dev/ttyACM1 ] && sudo chmod 777 /dev/SENSOR0
 
 
