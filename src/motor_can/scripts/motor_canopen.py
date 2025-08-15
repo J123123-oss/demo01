@@ -520,8 +520,26 @@ class ServoDriveController:
                     self.progress = 10
                 else:
                     rospy.logwarn("未检测到起始位置，保持等待...")
+        
+            # 在REVERSE状态下检测边界
+            if self.current_status == "REVERSE":
+                # 左侧前后传感器（a和c）同时触发
+                if msg.sensor_a and msg.sensor_c:
+                    rospy.logwarn("左侧边界全触发，立即STOP")
+                    self.set_state("STOP")
+                # 右侧前后传感器（b和d）同时触发
+                elif msg.sensor_b and msg.sensor_d:
+                    rospy.logwarn("右侧边界全触发，立即STOP")
+                    self.set_state("STOP")
+                # 仅左侧传感器触发
+                elif msg.sensor_a or msg.sensor_b:
+                    rospy.logwarn("下侧边界触发，进入LOWSTOP")
+                    self.set_state("LOWSTOP")
+                # 仅右侧传感器触发
+                elif msg.sensor_c or msg.sensor_d:
+                    rospy.logwarn("上侧边界触发，进入UPSTOP")
+                    self.set_state("UPSTOP")
             
-
         # 自动与手动模式下的检测
         if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
