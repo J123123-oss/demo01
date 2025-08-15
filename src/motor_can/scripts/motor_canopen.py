@@ -30,6 +30,8 @@ class ServoDriveController:
         self.motor_driver =True
         self.base_speed = 17000 * 0.8  #设置后退基础速度值
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
+
+        self.speed_pluse_max = 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -157,12 +159,17 @@ class ServoDriveController:
         self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
         
         # PID参数
-        self.pid_kp = 100.0
-        self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
-        self.pid_kd = 0.5  # 如果系统有震荡，可以调整微分增益来抑制震荡
+        # self.pid_kp = 100.0
+        # self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
+        # self.pid_kd = 0.5  # 如果系统有震荡，可以调整微分增益来抑制震荡
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
+        self.pid_kp = 50   # 降低比例增益减少振荡 
+        self.pid_ki = 1.5  # 提高积分增益增强对持续偏差的纠正
+        self.pid_kd = 20   # 大幅提高微分增益抑制快速变化
+        self.pid_correction_max = 200  # 放宽输出限制
+
 
         self.progress = 0   # 进度百分比，0-100
         self.battery_remaining = None # 电池百分比
@@ -644,24 +651,51 @@ class ServoDriveController:
         #         self.set_state("UPSTOP")
                 
         
+    # def pid_correction(self, current_yaw):
+    #     """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
+    #     error = self.target_yaw - current_yaw
+    #     self.pid_integral += error
+    #     derivative = error - self.pid_last_error
+    #     if abs(error) > 0.2:  # 如果误差小于0.2度，则不进行修正
+    #         correction = (self.pid_kp * error +
+    #                     self.pid_ki * self.pid_integral +
+    #                     self.pid_kd * derivative) 
+    #         # * 10  # 放大修正量
+    #     else:
+    #         correction = 0  # 在小范围内不进行调整
+
+    #     self.pid_last_error = error
+    #     correction = max(min(correction, self.pid_correction_max), -self.pid_correction_max)  # 限制修正量在-100到100之间
+    #     return correction
+    #     # return correction if self.current_status in ["FORWARD","LOADING"] else -correction
+
     def pid_correction(self, current_yaw):
-        """根据IMU当前偏航角进行PID矫正，返回速度修正量"""
+    """改进的PID矫正方法"""
         error = self.target_yaw - current_yaw
+        
+        # 死区控制 - 增大死区范围
+        if abs(error) < 1:
+            return 0
+        
+        # 抗积分饱和 - 大偏差时清零积分
+        if abs(error) > 5:
+            self.pid_integral = 0
+        
+        # PID计算
         self.pid_integral += error
         derivative = error - self.pid_last_error
-        if abs(error) > 0.2:  # 如果误差小于0.2度，则不进行修正
-            correction = (self.pid_kp * error +
-                        self.pid_ki * self.pid_integral +
-                        self.pid_kd * derivative) 
-            # * 10  # 放大修正量
-        else:
-            correction = 0  # 在小范围内不进行调整
-
+        
+        # 积分限幅
+        integral_max = 300
+        self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
+        
+        correction = (self.pid_kp * error +
+                    self.pid_ki * self.pid_integral +
+                    self.pid_kd * derivative)
+        
         self.pid_last_error = error
-        correction = max(min(correction, 100), -100)  # 限制修正量在-100到100之间
-        return correction
-        # return correction if self.current_status in ["FORWARD","LOADING"] else -correction
-    
+        return max(min(correction, self.pid_correction_max), -self.pid_correction_max)
+
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正左右轮速度
         # 1. START状态：速度模式初始化电机
@@ -735,8 +769,8 @@ class ServoDriveController:
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
-            right_speed = max(min(right_speed, 17000), -17000)
-            left_speed = max(min(left_speed, 17000), -17000)
+            right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
+            left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
 
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             if (self.last_left_speed != left_speed or
@@ -807,8 +841,8 @@ class ServoDriveController:
                 right_speed = -int(self.last_right_speed ) # >> 两轮反向运行进行调整
                 left_speed = -int(self.last_left_speed )
                 brush_speed = self.last_brush_speed
-                right_speed = max(min(right_speed, 17000), -17000)
-                left_speed = max(min(left_speed, 17000), -17000)
+                right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
+                left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -835,12 +869,12 @@ class ServoDriveController:
                 # 使用更平滑的速度调整方式
                 if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                 # 根据偏差方向调整轮速
-                    right_speed = left_speed = int (-15000 * 0.6 * self.flag)  # 基础后退速度+校正
+                    right_speed = left_speed = int (-self.base_speed * 0.6 * self.flag)  # 基础后退速度+校正
                 else:
                     # 角度接近时减速
-                    right_speed = left_speed = int(-15000 * 0.2 * self.flag)
-                right_speed = max(min(right_speed, 17000), -17000)
-                left_speed = max(min(left_speed, 17000), -17000)
+                    right_speed = left_speed = int(-self.base_speed * 0.2 * self.flag)
+                right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
+                left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 brush_speed = self.last_brush_speed
                 if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -881,7 +915,7 @@ class ServoDriveController:
         # 4. UPSTOP/LOWSTOP状态：IMU矫正+保持切换前速度
         elif self.current_status == "UPSTOP":
             left_speed = 0 # 上电机停
-            right_speed = int(-17000 * 1)  # 右轮保持切换前速度
+            right_speed = int(-self.speed_pluse_max * 1)  # 右轮保持切换前速度
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -897,7 +931,7 @@ class ServoDriveController:
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
-            left_speed = int(17000 * 1) # 上电机保持切换前速度 
+            left_speed = int(self.speed_pluse_max * 1) # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
@@ -1021,8 +1055,8 @@ def main():
     t = threading.Thread(target=ServoDriveController.keyboard_listener, args=(controller,), daemon=True)
     t.start()
     try:
-    # 每0.1秒执行一次状态执行器
-        rospy.Timer(rospy.Duration(0.1), controller.execute_state)
+    # 每0.05秒执行一次状态执行器
+        rospy.Timer(rospy.Duration(0.05), controller.execute_state)
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")
