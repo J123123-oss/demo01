@@ -692,7 +692,7 @@ class ServoDriveController:
         error = self.target_yaw - current_yaw
         
         # 死区控制 - 增大死区范围
-        if abs(error) < 1:
+        if abs(error) < 0.2:
             return 0
         
         # 抗积分饱和 - 大偏差时清零积分
