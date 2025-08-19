@@ -1,0 +1,20 @@
+# frpc.toml
+serverAddr = "121.40.57.48"
+serverPort = 7000
+auth.token = "giifen" 
+#必须与 frps的 token⼀致
+# SSH隧道配置
+[[proxies]]
+name = "ssh-orangepi-baihuiyuan"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 2220
+ # 健康检查（可选）
+healthCheck.type = "tcp"
+healthCheck.timeoutSeconds = 3
+healthCheck.maxFailed = 3
+healthCheck.intervalSeconds = 10
+ # ⽇志配置（可选）
+log.to = "console"
+log.level = "info"

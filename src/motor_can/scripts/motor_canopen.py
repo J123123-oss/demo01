@@ -688,7 +688,7 @@ class ServoDriveController:
     #     # return correction if self.current_status in ["FORWARD","LOADING"] else -correction
 
     def pid_correction(self, current_yaw):
-    """改进的PID矫正方法"""
+        """改进的PID矫正方法"""
         error = self.target_yaw - current_yaw
         
         # 死区控制 - 增大死区范围

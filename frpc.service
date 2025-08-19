@@ -1,0 +1,11 @@
+[Unit]
+Description=Frp Client Service
+After=network.target
+[Service]
+Type=simple
+User=nobody
+Restart=on-failure
+RestartSec=5s
+ExecStart=/home/orangepi/Downloads/frp_0.52.3_linux_arm64/frpc -c /home/orangepi/Downloads/frp_0.52.3_linux_arm64/frpc.toml
+[Install]
+WantedBy=multi-user.target

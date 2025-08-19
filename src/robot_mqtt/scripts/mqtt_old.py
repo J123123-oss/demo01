@@ -161,10 +161,10 @@ if __name__ == "__main__":
     config = {
         "broker": rospy.get_param("~broker", "121.40.57.48"),
         "port": int(rospy.get_param("port", 8883)),
-        "user": rospy.get_param("~user", "baihuiyuan"),
-        "password": rospy.get_param("~password", "Giifen@123"),
-        "topic_status": rospy.get_param("~topic_status", "robot/GF-HZ-TEST/status"),
-        "topic_cmd": rospy.get_param("~topic_cmd", "robot/GF-HZ-TEST/cmd"),
+        "user": rospy.get_param("~user", "gf-mounted"),
+        "password": rospy.get_param("~password", "20230810"),
+        "topic_status": rospy.get_param("~topic_status", "robot/001/status"),
+        "topic_cmd": rospy.get_param("~topic_cmd", "robot/001/cmd"),
         "client_id": rospy.get_param("~client_id", "python-mqtt-client-ID"),
         "ca_cert": None
     }
