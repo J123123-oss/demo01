@@ -483,7 +483,7 @@ class ServoDriveController:
         }
         if key in key_mapping:
             if key != 'a':
-                self.auto_mode = True
+                self.auto_mode = False
             else:
                 self.auto_mode = True
             self.set_state(key_mapping[key])
