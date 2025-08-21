@@ -21,7 +21,8 @@ class MQTTClient:
         self.broker = broker
         self.port = port
         self.user = user
-        self.password = str(password)
+        # self.password = str(password)
+        self.password = password
         self.topic_status = topic_status  # ROS状态发布到MQTT
         self.topic_cmd = topic_cmd        # MQTT控制指令下发到ROS
         self.client_id = client_id
@@ -161,8 +162,13 @@ if __name__ == "__main__":
     config = {
         "broker": rospy.get_param("~broker", "121.40.57.48"),
         "port": int(rospy.get_param("port", 8883)),
-        "user": rospy.get_param("~user", "gf-mounted"),
-        "password": rospy.get_param("~password", "20230810"),
+        "user": rospy.get_param("~user", "baihuiyuan"),
+        "password": rospy.get_param("~password", "Giifen@123"),
+        # "user": rospy.get_param("~user", "admin"),
+        # "password": rospy.get_param("~password", "admin_password"),
+        # "user": rospy.get_param("~user", "gf-mounted"),
+        # "password": rospy.get_param("~password", "20230810"),
+
         "topic_status": rospy.get_param("~topic_status", "robot/001/status"),
         "topic_cmd": rospy.get_param("~topic_cmd", "robot/001/cmd"),
         "client_id": rospy.get_param("~client_id", "python-mqtt-client-ID"),

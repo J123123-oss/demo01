@@ -70,12 +70,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": 250 * rate,
                 "velocity_low": -250 * rate,
-                "velocity_brush": 1000 * rate
+                "velocity_brush": -1000 * rate
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -250 * rate,
                 "velocity_low": 250 * rate,
-                "velocity_brush": -1000 * rate
+                "velocity_brush": 1000 * rate
             },
             "LOADING": {
                 "velocity_up": 250 *rate,
@@ -692,7 +692,7 @@ class ServoDriveController:
         error = self.target_yaw - current_yaw
         
         # 死区控制 - 增大死区范围
-        if abs(error) < 0.2:
+        if abs(error) < 0.05:
             return 0
         
         # 抗积分饱和 - 大偏差时清零积分
@@ -890,7 +890,7 @@ class ServoDriveController:
                     right_speed = left_speed = int (-self.base_speed * 0.6 * self.flag)  # 基础后退速度+校正
                 else:
                     # 角度接近时减速
-                    right_speed = left_speed = int(-self.base_speed * 0.2 * self.flag)
+                    right_speed = left_speed = int(-self.base_speed * 0.4 * self.flag)
                 right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 brush_speed = self.last_brush_speed

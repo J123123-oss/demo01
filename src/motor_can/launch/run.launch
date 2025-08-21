@@ -4,7 +4,7 @@
 <arg name="robot_ID" default="GF-HZ-TEST" />
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
     </node>
-    <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
+    <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" output="screen>
         <param name="~broker" value="121.40.57.48"/>
         <param name="~port" value="8883"/>
         <param name="~user" value="baihuiyuan"/>
