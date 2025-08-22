@@ -134,7 +134,7 @@ class BatteryMonitor:
 
     def run(self):
         """主循环"""
-        rate = rospy.Rate(1)  # 1Hz
+        rate = rospy.Rate(10)  # 1Hz
         while not rospy.is_shutdown():
             try:
                 # 发送基本信息请求

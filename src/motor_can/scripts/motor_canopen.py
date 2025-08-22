@@ -61,12 +61,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": 250 * rate,
                 "velocity_low": -250 * rate,
-                "velocity_brush": 1000 * rate
+                "velocity_brush": -1000 * rate
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -250 * rate,
                 "velocity_low": 250 * rate,
-                "velocity_brush": -1000 * rate
+                "velocity_brush": 1000 * rate
             },
             "LOADING": {
                 "velocity_up": 250 *rate,
