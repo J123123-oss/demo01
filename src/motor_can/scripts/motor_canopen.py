@@ -28,6 +28,7 @@ class ServoDriveController:
         self.has_reverse_counter = 0
         self.reverse_start_time = None
         self.motor_driver =True
+        self.motor_base = 350
         self.base_speed = 17000 * 0.8  #设置后退基础速度值
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
@@ -57,8 +58,8 @@ class ServoDriveController:
                 # 位置模式未启用
                 # "position_left": 65188,  # 左侧电机目标位置 由300cm转换而来  651883
                 # "position_right": -65188,  # 右侧电机目标位置              651883
-                # "velocity_up": 250 * rate,
-                # "velocity_low": 250 * rate, #自动速度无法设置负值，二者速度相同
+                # "velocity_up": self.motor_base * rate,
+                # "velocity_low": self.motor_base * rate, #自动速度无法设置负值，二者速度相同
                 # "velocity_brush": -100 * rate #后续添加距离到位后反转的判断
             },
 
@@ -68,23 +69,23 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": 250 * rate,
-                "velocity_low": -250 * rate,
+                "velocity_up": self.motor_base * rate,
+                "velocity_low": -self.motor_base * rate,
                 "velocity_brush": -1000 * rate
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -250 * rate,
-                "velocity_low": 250 * rate,
+                "velocity_up": -self.motor_base * rate,
+                "velocity_low": self.motor_base * rate,
                 "velocity_brush": 1000 * rate
             },
             "LOADING": {
-                "velocity_up": 250 *rate,
-                "velocity_low": -250 *rate,
+                "velocity_up": self.motor_base *rate,
+                "velocity_low": -self.motor_base *rate,
                 "velocity_brush": 0
             },
             "UNLOADING":{
-                "velocity_up": -250 *rate,
-                "velocity_low": 250 *rate,
+                "velocity_up": -self.motor_base *rate,
+                "velocity_low": self.motor_base *rate,
                 "velocity_brush": 0
             },
             "UPSTOP":{
@@ -110,7 +111,7 @@ class ServoDriveController:
                 #切换为重置初始偏航角
             }
             # "FORWARD": {  # 测试电机功耗前进状态
-            #     #下发100到电机减速20：1，实际为5RPM ，发250最终12.5RPM，速度0.078m/s
+            #     #下发100到电机减速20：1，实际为5RPM ，发self.motor_base最终12.5RPM，速度0.078m/s
             #     "velocity_up": 637 * rate,   #实际速度0.2m/s
             #     "velocity_low": -637 * rate,
             #     "velocity_brush": 0 * rate
@@ -814,7 +815,7 @@ class ServoDriveController:
             #         self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
 
-            angle_condition_met = (-5 < self.imu_yaw < -2.5 or 2.5 < self.imu_yaw < 5)
+            angle_condition_met = (-5 < self.imu_yaw < -1.5 or 1.5 < self.imu_yaw < 5)
         
             if angle_condition_met:
                 # 第一次检测到角度问题时记录时间
