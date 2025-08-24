@@ -186,7 +186,7 @@ class ServoDriveController:
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
 
-        # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+        self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
 
 
 
@@ -1025,6 +1025,77 @@ class ServoDriveController:
                 self.publish_timer.shutdown()
             self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
 
+    def get_max_torque(self, motor_id):
+        """
+        读取配置的最大转矩 (6072h)
+        :param motor_id: 电机ID
+        :return: 最大转矩值 (千分之一额定转矩)，读取失败返回None
+        """
+        # 发送读取对象字典命令 (索引6072h, 子索引00h)
+        self.send_command(motor_id, [0x40, 0x72, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        
+        # 等待回复
+        start_time = time.time()
+        while time.time() - start_time < 0.5:  # 500ms超时
+            msg = self.bus.recv(0.1)  # 100ms等待
+            if msg and msg.arbitration_id == (0x580 + motor_id):
+                # 检查是否是正确的返回数据
+                if len(msg.data) >= 6 and msg.data[0] in [0x4B, 0x43]:
+                    # 16位返回值 (Uint16)
+                    max_torque = msg.data[4] | (msg.data[5] << 8)
+                    return max_torque
+        rospy.logwarn(f"读取电机 {motor_id} 最大转矩超时")
+        return None
+    def get_actual_velocity(self, motor_id):
+        """
+        读取实际速度 (606Ch)
+        :param motor_id: 电机ID
+        :return: 实际速度值 (脉冲/秒)，读取失败返回None
+        """
+        # 发送读取对象字典命令 (索引606Ch, 子索引00h)
+        self.send_command(motor_id, [0x40, 0x6C, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        
+        # 等待回复
+        start_time = time.time()
+        while time.time() - start_time < 0.5:  # 500ms超时
+            msg = self.bus.recv(0.1)  # 100ms等待
+            if msg and msg.arbitration_id == (0x580 + motor_id):
+                # 检查是否是正确的返回数据
+                if len(msg.data) >= 8 and msg.data[0] == 0x43:
+                    # 32位返回值 (Int32)
+                    velocity = (msg.data[4] |
+                            (msg.data[5] << 8) |
+                            (msg.data[6] << 16) |
+                            (msg.data[7] << 24))
+                    # 处理符号位 (32位有符号整数)
+                    if velocity > 0x7FFFFFFF:
+                        velocity -= 0x100000000
+                    return velocity
+        rospy.logwarn(f"读取电机 {motor_id} 实际速度超时")
+        return None
+    def get_actual_torque(self, motor_id):
+        """
+        读取实际转矩 (6077h)
+        :param motor_id: 电机ID
+        :return: 实际转矩值 (千分之一额定转矩)，读取失败返回None
+        """
+        self.send_command(motor_id, [0x40, 0x77, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        
+        # 等待回复
+        start_time = time.time()
+        while time.time() - start_time < 0.5:  # 500ms超时
+            msg = self.bus.recv(0.1)  # 100ms等待
+            if msg and msg.arbitration_id == (0x580 + motor_id):
+                # 验证数据长度和命令字节
+                if len(msg.data) >= 6 and msg.data[0] == 0x4B:
+                    # 解析16位转矩值 (Int16)
+                    torque = msg.data[4] | (msg.data[5] << 8)
+                    # 处理有符号数 (16位有符号整数)
+                    if torque > 0x7FFF:
+                        torque -= 0x10000
+                    return torque
+        rospy.logwarn(f"读取电机 {motor_id} 实际转矩超时")
+        return None
     def read_fault_code(self, motor_id):
         """读取电机故障码"""
         # 发送读取故障码指令
@@ -1065,11 +1136,39 @@ class ServoDriveController:
     def check_and_clear_faults(self):
         """定期检查并清除电机故障"""
         for motor_id in [2, 3, 4]:  # 检查所有电机
+            # 1. 检查故障码
             fault_code = self.read_fault_code(motor_id)
+            actual_velocity = self.get_actual_velocity(motor_id)
             if fault_code and fault_code != 0:  # 非0表示有故障
                 rospy.logerr(f"电机 {motor_id} 检测到故障! 代码: 0x{fault_code:04X}")
+                # self.clear_fault(motor_id)
+                # time.sleep(0.5)  # 等待复位完成
+                # 获取实际转矩帮助诊断
+                actual_torque = self.get_actual_torque(motor_id)
+                if actual_torque is not None:
+                    rospy.loginfo(f"故障时转矩: {actual_torque}‰")
+                
+                # 获取实际速度
+                if actual_velocity is not None:
+                    rospy.loginfo(f"故障时速度: {actual_velocity} pulse/s")
+                
+                # 尝试清除故障
                 self.clear_fault(motor_id)
                 time.sleep(0.5)  # 等待复位完成
+        
+            # 2. 非故障情况监控
+            # 读取当前转矩
+            actual_torque = self.get_actual_torque(motor_id)
+            
+            # 获取配置的最大转矩
+            max_torque = self.get_max_torque(motor_id)
+            if max_torque is not None and actual_torque is not None:
+                rospy.logdebug(f"电机 {motor_id} - 实际转矩: {actual_torque}‰ | 最大限制: {max_torque}‰")
+                
+                # 监控转矩接近阈值
+                utilization = abs(actual_torque) / max_torque * 100
+                if utilization > 80:
+                    rospy.logwarn(f"电机 {motor_id} 转矩利用率过高: {utilization:.1f}%")
 
         
     @staticmethod
