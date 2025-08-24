@@ -18,8 +18,8 @@ import select
 rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    # def __init__(self, channel='vcan0', interface='socketcan'):
-    def __init__(self, channel='can0', interface='socketcan'):
+    def __init__(self, channel='vcan0', interface='socketcan'):
+    # def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         self.last_left_speed = 0
         self.last_right_speed = 0
@@ -165,7 +165,7 @@ class ServoDriveController:
         self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒2次
         self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
-        
+        self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
         # PID参数
         # self.pid_kp = 100.0
         # self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
@@ -189,7 +189,7 @@ class ServoDriveController:
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
 
-        self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+        # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
 
 
 
@@ -198,7 +198,7 @@ class ServoDriveController:
         if new_state not in self.status_config:
             rospy.logwarn(f"尝试设置无效状态: {new_state}")
             return False
-        if new_state == self.current_status and new_state != "ROLLER_ACCEL":
+        if new_state == self.current_status and new_state != "ROLLER_ACCEL" and new_state != "ROLLER_DECEL":
             return False  # 状态未改变
         # 检查是否从START切换到其他模式
         # if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
@@ -224,11 +224,19 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
+            if self.fault_check_timer is not None:    
+                self.fault_check_timer.shutdown()
+                self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+
             threading.Thread(target=self.delayed_publish_freq_switch,args=(3,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
+            if self.fault_check_timer is not None:    
+                self.fault_check_timer.shutdown()
+                self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+
         # 进入运动状态时，只有当前不是REVERSE状态才更新prev_motion_state
         # if new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
         if new_state in ["FORWARD", "BACKWARD"]:
@@ -481,8 +489,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -1044,7 +1052,9 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
             self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
-
+            if self.fault_check_timer is not None:
+                self.fault_check_timer.shutdown()
+            self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_all_faults())
     def get_max_torque(self, motor_id):
         """
         读取配置的最大转矩 (6072h)
