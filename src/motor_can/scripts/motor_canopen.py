@@ -34,7 +34,7 @@ class ServoDriveController:
         self.base_speed = 17000   #设置后退基础速度值  * 0.8 > * 1
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 23800   # 17000
+        self.speed_pluse_max = 32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -74,12 +74,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": 1000 * rate      #-1000 同向
+                "velocity_brush": 1600 * rate      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -1000 * rate      #1000 同向
+                "velocity_brush": -1600 * rate      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -88,7 +88,7 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 1000 * rate
+                "velocity_brush": 1600 * rate
             },
             "UNLOADING":{
                 "velocity_up": -self.motor_base *rate,
