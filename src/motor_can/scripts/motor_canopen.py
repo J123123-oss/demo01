@@ -34,7 +34,7 @@ class ServoDriveController:
         self.base_speed = 17000   #设置后退基础速度值  * 0.8 > * 1
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 32467      #23800   # 17000
+        self.speed_pluse_max = 23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -198,7 +198,7 @@ class ServoDriveController:
         if new_state not in self.status_config:
             rospy.logwarn(f"尝试设置无效状态: {new_state}")
             return False
-        if new_state == self.current_status and new_state != "ROLLER_ACCEL" and new_state != "ROLLER_DECEL":
+        if new_state == self.current_status and new_state != "ROLLER_ACCEL" and new_state != "ROLLER_DECEL" and new_state != "STOP":
             return False  # 状态未改变
         # 检查是否从START切换到其他模式
         # if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
@@ -228,7 +228,7 @@ class ServoDriveController:
                 self.fault_check_timer.shutdown()
                 self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
 
-            threading.Thread(target=self.delayed_publish_freq_switch,args=(3,),daemon=True).start()
+            threading.Thread(target=self.delayed_publish_freq_switch,args=(10,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
@@ -586,6 +586,7 @@ class ServoDriveController:
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
+                    print("——————————————————————进仓完成——————————————————————")
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
                 elif (msg.sensor_c and not msg.sensor_a):
@@ -606,8 +607,6 @@ class ServoDriveController:
                     #清空自动流程状态
                     self.complete_state = True
                     self.initial_yaw = None  # 重置初始偏航角
-                    self.progress = 0
-
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
@@ -629,7 +628,6 @@ class ServoDriveController:
                     #清空自动流程状态
                     self.complete_state = True
                     self.initial_yaw = None  # 重置初始偏航角
-
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
@@ -655,6 +653,7 @@ class ServoDriveController:
                 self.auto_step = None
                 self.is_lowstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
+                print("——————————————————————由LOWSTOP至进仓完成——————————————————————")
 
             else:
                 self.complete_state = False
@@ -671,6 +670,7 @@ class ServoDriveController:
                 self.auto_step = None
                 self.is_upstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
+                print("——————————————————————由UPSTOP至进仓完成——————————————————————")
 
             else:
                 self.complete_state = False
@@ -1023,15 +1023,14 @@ class ServoDriveController:
 
         # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测 未使用
         elif self.current_status in ["LOADING", "UNLOADING"]:
-            correction = self.pid_correction(self.imu_yaw) * rate
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
-            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] )
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] )
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-                rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
+                # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                # rospy.loginfo(f"左轮速度: {left_speed}, 右轮速度: {right_speed}")
                 
                 self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
@@ -1054,7 +1053,7 @@ class ServoDriveController:
             self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
             if self.fault_check_timer is not None:
                 self.fault_check_timer.shutdown()
-            self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_all_faults())
+            self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
     def get_max_torque(self, motor_id):
         """
         读取配置的最大转矩 (6072h)
@@ -1150,7 +1149,7 @@ class ServoDriveController:
                 if len(msg.data) >= 6 and msg.data[0] == 0x43:
                     # 16位返回值 (Uint16)
                     current = msg.data[4] | (msg.data[5] << 8)
-                    rospy.logwarn(f"读取电机 {motor_id} 最大电流: {current}‰额定电流")
+                    rospy.logwarn(f"读取电机 {motor_id} 最大电流: {current/1000}‰额定电流")
                     return current
         rospy.logwarn(f"读取电机 {motor_id} 最大电流超时")
         return None
@@ -1175,7 +1174,7 @@ class ServoDriveController:
                     # 处理有符号数
                     if current > 0x7FFF:
                         current -= 0x10000
-                    rospy.logwarn(f"读取电机 {motor_id} 实际电流: {current}‰额定电流")
+                    rospy.logwarn(f"读取电机 {motor_id} 实际电流: {current/1000}‰额定电流")
                     return current
         rospy.logwarn(f"读取电机 {motor_id} 实际电流超时")
         return None
@@ -1225,7 +1224,7 @@ class ServoDriveController:
             fault_code = self.read_fault_code(motor_id)
             actual_velocity = self.get_actual_velocity(motor_id)
             # max_current = self.get_max_current(motor_id)
-            # actual_current = self.get_actual_current(motor_id)
+            actual_current = self.get_actual_current(motor_id)
             if fault_code and fault_code != 0:  # 非0表示有故障
                 rospy.logerr(f"电机 {motor_id} 检测到故障! 代码: 0x{fault_code:04X}")
                 # 获取实际转矩帮助诊断
