@@ -269,6 +269,8 @@ class ServoDriveController:
     def lock_motor(self):
         rospy.loginfo("电机向下转动，锁止")
         self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
+        self.initial_yaw = None  # 重置初始偏航角
+
 
     def enter_absolute_position_mode(self, motor_id, position):
         """设置电机进入绝对位置模式并设置目标位置"""
@@ -582,7 +584,7 @@ class ServoDriveController:
                     threading.Timer(5.0, self.lock_motor).start()
                     self.set_state("STOP")
                     self.complete_state = True
-                    self.initial_yaw = None  # 重置初始偏航角
+                    # self.initial_yaw = None  # 重置初始偏航角
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
@@ -606,7 +608,7 @@ class ServoDriveController:
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
-                    self.initial_yaw = None  # 重置初始偏航角
+                    # self.initial_yaw = None  # 重置初始偏航角
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
@@ -627,7 +629,7 @@ class ServoDriveController:
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
-                    self.initial_yaw = None  # 重置初始偏航角
+                    # self.initial_yaw = None  # 重置初始偏航角
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
@@ -648,7 +650,7 @@ class ServoDriveController:
                 # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
-                self.initial_yaw = None  # 重置初始偏航角
+                # self.initial_yaw = None  # 重置初始偏航角
                 self.progress = 100
                 self.auto_step = None
                 self.is_lowstop = False
@@ -665,7 +667,7 @@ class ServoDriveController:
                 # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
-                self.initial_yaw = None  # 重置初始偏航角
+                # self.initial_yaw = None  # 重置初始偏航角
                 self.progress = 100
                 self.auto_step = None
                 self.is_upstop = False
