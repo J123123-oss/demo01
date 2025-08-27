@@ -519,7 +519,7 @@ class ServoDriveController:
         }
         if key in key_mapping:
             if key != 'a':
-                self.auto_mode = True
+                self.auto_mode = False
             else:
                 self.auto_mode = True
             self.set_state(key_mapping[key])
@@ -595,10 +595,19 @@ class ServoDriveController:
                     self.set_state("UPSTOP")
 
             if self.current_status == self.status_list[2]:  # BACKWARD
-                if (msg.sensor_b or msg.sensor_d):
+                if (msg.sensor_b and msg.sensor_d):
                     #自动程序：第一步检测接近开关到位>后退>到边缘(可加入对正程序?)自动切换前进>直到进仓>发布完成消息>STOP停止使能。
+                    self.set_state("LOADING") # 单滚刷运行，之后切换状态
+                    time.sleep(3)
                     self.set_state("FORWARD")
                     self.progress = 60
+                    self.initial_yaw = None  # 在对侧执行，重置初始偏航角
+                    print("在对侧执行，重置初始偏航角")
+                elif (msg.sensor_b and not msg.sensor_d):
+                    self.set_state("LOWSTOP")
+                elif (msg.sensor_d and not msg.sensor_b):
+                    self.set_state("UPSTOP")
+
             
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
@@ -637,7 +646,7 @@ class ServoDriveController:
                 elif (msg.sensor_b and not msg.sensor_d):
                     self.set_state("LOWSTOP")
 
-                elif (msg.sensor_b and not msg.sensor_d):
+                elif (msg.sensor_d and not msg.sensor_b):
                     self.set_state("UPSTOP")
         
 
@@ -659,6 +668,13 @@ class ServoDriveController:
 
             else:
                 self.complete_state = False
+            if msg.sensor_d:
+                self.set_state("LOADING") # 单滚刷运行，之后切换状态
+                time.sleep(3)
+                self.set_state("FORWARD")
+                self.progress = 60
+                self.initial_yaw = None  # 在对侧执行，重置初始偏航角
+                print("在LOWSTOP执行，对侧重置初始偏航角")
         if self.current_status == self.status_list[6]: #UPSTOP 
                 #确保停到位
             if msg.sensor_a:
@@ -676,6 +692,13 @@ class ServoDriveController:
 
             else:
                 self.complete_state = False
+            if msg.sensor_b:
+                self.set_state("LOADING") # 单滚刷运行，之后切换状态
+                time.sleep(3)
+                self.set_state("FORWARD")
+                self.progress = 60
+                self.initial_yaw = None  # 在对侧执行，重置初始偏航角
+                print("在UPSTOP执行，对侧重置初始偏航角")
 
         # if self.current_status == self.status_list[4]:  # LOADING 未使用
         # # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
@@ -960,7 +983,8 @@ class ServoDriveController:
         # 4. UPSTOP/LOWSTOP状态：IMU矫正+保持切换前速度
         elif self.current_status == "UPSTOP":
             left_speed = 0 # 上电机停
-            right_speed = int(-self.speed_pluse_max * 1)  # 右轮保持切换前速度
+            # right_speed = int(-self.speed_pluse_max * 1)  # 右轮保持切换前速度
+            right_speed = self.current_velocity_low  # 右轮保持切换前速度
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -976,7 +1000,8 @@ class ServoDriveController:
             self.current_velocity_low = right_speed
             self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
-            left_speed = int(self.speed_pluse_max * 1) # 上电机保持切换前速度 
+            # left_speed = int(self.speed_pluse_max * 1) # 上电机保持切换前速度 
+            left_speed =  self.current_velocity_up  # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
@@ -1151,7 +1176,7 @@ class ServoDriveController:
                 if len(msg.data) >= 6 and msg.data[0] == 0x43:
                     # 16位返回值 (Uint16)
                     current = msg.data[4] | (msg.data[5] << 8)
-                    rospy.logwarn(f"读取电机 {motor_id} 最大电流: {current/1000}‰额定电流")
+                    rospy.logwarn(f"读取电机 {motor_id} 最大电流: {current/1000}额定电流")
                     return current
         rospy.logwarn(f"读取电机 {motor_id} 最大电流超时")
         return None
@@ -1176,7 +1201,7 @@ class ServoDriveController:
                     # 处理有符号数
                     if current > 0x7FFF:
                         current -= 0x10000
-                    rospy.logwarn(f"读取电机 {motor_id} 实际电流: {current/1000}‰额定电流")
+                    rospy.logwarn(f"读取电机 {motor_id} 实际电流: {current/1000}额定电流")
                     return current
         rospy.logwarn(f"读取电机 {motor_id} 实际电流超时")
         return None

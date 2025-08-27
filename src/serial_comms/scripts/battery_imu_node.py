@@ -187,11 +187,11 @@ class BatteryAndIMUNode:
             # === 发送新请求 ===
             if self.current_state == STATE_READY:
                 # 优先处理电池请求（1Hz）
-                if current_time - self.last_battery_sent >= 1.0:
+                if current_time - self.last_battery_sent >= 10.0:
                     if self.send_battery_query():
                         self.last_battery_sent = current_time
                         self.current_state = STATE_WAITING_BATTERY
-                        self.battery_timeout = current_time + 0.5  # 100ms超时
+                        self.battery_timeout = current_time + 1.0  # 最初是0.1s超时，改为0.5s后运行，目前1.0s
                 
                 # 其次处理IMU请求（50Hz）
                 elif current_time - self.last_imu_sent >= 0.02:
