@@ -369,14 +369,19 @@ class ServoDriveController:
         try:
             cmd_obj = json.loads(msg.data)
             command = cmd_obj.get("command", None)
-            if command:
+            if command == "GET_STATUS":
+                self.publish_state()
+                # return
+            elif command in self.status_list:
                 # print("cmd:", command)
                 self.set_state(command)  
             else:
                 rospy.logwarn(f"未找到command字段: {msg.data}")
+            
         except Exception as e:
             rospy.logwarn(f"消息解析失败，尝试按字符串处理: {msg.data}, 错误: {e}")
             self.set_state(msg.data)
+            self.publish_state()
 
     def imu_callback(self, msg):
         """处理IMU数据"""
@@ -557,24 +562,24 @@ class ServoDriveController:
                 else:
                     rospy.logwarn("未检测到起始位置，保持等待...")
         
-            # 在REVERSE状态下检测边界
-            if self.current_status == "REVERSE":
-                # 左侧前后传感器（a和c）同时触发
-                if msg.sensor_a and msg.sensor_c:
-                    rospy.logwarn("左侧边界全触发，立即STOP")
-                    self.set_state("STOP")
-                # 右侧前后传感器（b和d）同时触发
-                elif msg.sensor_b and msg.sensor_d:
-                    rospy.logwarn("右侧边界全触发，立即STOP")
-                    self.set_state("STOP")
-                # 仅左侧传感器触发
-                elif msg.sensor_a or msg.sensor_b:
-                    rospy.logwarn("下侧边界触发，进入LOWSTOP")
-                    self.set_state("LOWSTOP")
-                # 仅右侧传感器触发
-                elif msg.sensor_c or msg.sensor_d:
-                    rospy.logwarn("上侧边界触发，进入UPSTOP")
-                    self.set_state("UPSTOP")
+        # 在REVERSE状态下检测边界
+        if self.current_status == "REVERSE":
+            # 左侧前后传感器（a和c）同时触发
+            if msg.sensor_a and msg.sensor_c:
+                rospy.logwarn("左侧边界全触发，立即STOP")
+                self.set_state("STOP")
+            # 右侧前后传感器（b和d）同时触发
+            elif msg.sensor_b and msg.sensor_d:
+                rospy.logwarn("右侧边界全触发，立即STOP")
+                self.set_state("STOP")
+            # 仅左侧传感器触发
+            elif msg.sensor_a or msg.sensor_b:
+                rospy.logwarn("下侧边界触发，进入LOWSTOP")
+                self.set_state("LOWSTOP")
+            # 仅右侧传感器触发
+            elif msg.sensor_c or msg.sensor_d:
+                rospy.logwarn("上侧边界触发，进入UPSTOP")
+                self.set_state("UPSTOP")
             
         # 自动与手动模式下的检测
         if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>STOP 
@@ -588,7 +593,7 @@ class ServoDriveController:
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
-                    print("——————————————————————进仓完成——————————————————————")
+                    rospy.loginfo("——————————————————————进仓完成——————————————————————")
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
                 elif (msg.sensor_c and not msg.sensor_a):
@@ -602,7 +607,7 @@ class ServoDriveController:
                     self.set_state("FORWARD")
                     self.progress = 60
                     self.initial_yaw = None  # 在对侧执行，重置初始偏航角
-                    print("在对侧执行，重置初始偏航角")
+                    rospy.loginfo("在对侧执行，重置初始偏航角")
                 elif (msg.sensor_b and not msg.sensor_d):
                     self.set_state("LOWSTOP")
                 elif (msg.sensor_d and not msg.sensor_b):
@@ -664,7 +669,7 @@ class ServoDriveController:
                 self.auto_step = None
                 self.is_lowstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
-                print("——————————————————————由LOWSTOP至进仓完成——————————————————————")
+                rospy.loginfo("——————————————————————由LOWSTOP至进仓完成——————————————————————")
 
             else:
                 self.complete_state = False
@@ -674,7 +679,7 @@ class ServoDriveController:
                 self.set_state("FORWARD")
                 self.progress = 60
                 self.initial_yaw = None  # 在对侧执行，重置初始偏航角
-                print("在LOWSTOP执行，对侧重置初始偏航角")
+                rospy.loginfo("在LOWSTOP执行，对侧重置初始偏航角")
         if self.current_status == self.status_list[6]: #UPSTOP 
                 #确保停到位
             if msg.sensor_a:
@@ -688,7 +693,7 @@ class ServoDriveController:
                 self.auto_step = None
                 self.is_upstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
-                print("——————————————————————由UPSTOP至进仓完成——————————————————————")
+                rospy.loginfo("——————————————————————由UPSTOP至进仓完成——————————————————————")
 
             else:
                 self.complete_state = False
@@ -698,7 +703,7 @@ class ServoDriveController:
                 self.set_state("FORWARD")
                 self.progress = 60
                 self.initial_yaw = None  # 在对侧执行，重置初始偏航角
-                print("在UPSTOP执行，对侧重置初始偏航角")
+                rospy.loginfo("在UPSTOP执行，对侧重置初始偏航角")
 
         # if self.current_status == self.status_list[4]:  # LOADING 未使用
         # # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
