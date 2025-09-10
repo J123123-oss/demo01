@@ -1,18 +1,18 @@
 #!/bin/bash
-PPP_IFACE="ppp0"  # ppp接口名称
+PPP_IFACE="ens33"  # ppp接口名称
 
 # 检查4G连接状态
 check_4g_connection() {
-    if ip link show $PPP_IFACE > /dev/null 2>&1; then
-        if ping -c 1 -I $PPP_IFACE -W 2 121.40.57.48 > /dev/null 2>&1; then
-            echo "4G连接正常"
+    if ping -c 2 -W 3 121.40.57.48 > /dev/null 2>&1; then
+        if ip link show $PPP_IFACE > /dev/null 2>&1; then
+            echo "连接正常"
             return 0
         else
-            echo "4G接口存在但无法通信"
+            echo "4G接口不存在"
             return 1
         fi
     else
-        echo "4G接口不存在"
+        echo "网络无法通信"
         return 2
     fi
 }
