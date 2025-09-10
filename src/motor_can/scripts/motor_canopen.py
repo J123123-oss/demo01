@@ -595,7 +595,7 @@ class ServoDriveController:
                     self.elevator_stage = 0  # 重置电缸阶段
                     rospy.loginfo("——————————————————————进仓完成——————————————————————")
                     rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
-                    for i in range(5):
+                    for i in range(50):
                         rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
                     rospy.logwarn("---------- 强制刷新缓冲区结束 ----------")
                 elif (msg.sensor_a and not msg.sensor_c):
@@ -675,7 +675,7 @@ class ServoDriveController:
                 self.elevator_stage = 0  # 重置电缸阶段
                 rospy.loginfo("——————————————————————由LOWSTOP至进仓完成——————————————————————")
                 rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
-                for i in range(5):
+                for i in range(50):
                     rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
                 rospy.logwarn("---------- 强制刷新缓冲区结束 ----------")
 
@@ -703,7 +703,7 @@ class ServoDriveController:
                 self.elevator_stage = 0  # 重置电缸阶段
                 rospy.loginfo("——————————————————————由UPSTOP至进仓完成——————————————————————")
                 rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
-                for i in range(5):
+                for i in range(50):
                     rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
                 rospy.logwarn("---------- 强制刷新缓冲区结束 ----------")
             else:
