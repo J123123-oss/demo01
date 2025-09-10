@@ -229,6 +229,9 @@ class MQTTClient:
         try:
             # 设置用户名和密码
             self.client.username_pw_set(self.user, self.password)
+
+            # 启用自动重连
+            self.client.reconnect_delay_set(min_delay=1, max_delay=60)
         
             self.client.connect(self.broker, self.port, keepalive)
             print(f"✅ 连接成功!")
