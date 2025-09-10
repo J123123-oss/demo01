@@ -18,8 +18,8 @@ import select
 rate = 68  # Hz   166.66>> 68.26
 
 class ServoDriveController:
-    def __init__(self, channel='vcan0', interface='socketcan'):
-    # def __init__(self, channel='can0', interface='socketcan'):
+    # def __init__(self, channel='vcan0', interface='socketcan'):
+    def __init__(self, channel='can0', interface='socketcan'):
         self.bus = can.interface.Bus(channel=channel, interface=interface)
         self.last_left_speed = 0
         self.last_right_speed = 0
@@ -163,9 +163,9 @@ class ServoDriveController:
         self.auto_mode = True #默认自动模式
         self.auto_step = None # 当前自动程序所在状态
         self.count = 1 # 切换自动与手动 
-        #控制不同状态下的发布频率,初始化默认为一秒2次
-        self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
-        self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+        #控制不同状态下的发布频率,初始化默认为一秒1次
+        self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+        self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
         # PID参数
         # self.pid_kp = 100.0
         # self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
@@ -223,19 +223,19 @@ class ServoDriveController:
             self.elevator_stage = 0
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
             if self.fault_check_timer is not None:    
                 self.fault_check_timer.shutdown()
-                self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+                self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
-            threading.Thread(target=self.delayed_publish_freq_switch,args=(10,),daemon=True).start()
+            threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(0.5), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
             if self.fault_check_timer is not None:    
                 self.fault_check_timer.shutdown()
-                self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+                self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
         # 进入运动状态时，只有当前不是REVERSE状态才更新prev_motion_state
         # if new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
@@ -496,8 +496,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -594,6 +594,10 @@ class ServoDriveController:
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
                     rospy.loginfo("——————————————————————进仓完成——————————————————————")
+                    rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
+                    for i in range(5):
+                        rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
+                    rospy.logwarn("---------- 强制刷新缓冲区结束 ----------")
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
                 elif (msg.sensor_c and not msg.sensor_a):
@@ -670,6 +674,10 @@ class ServoDriveController:
                 self.is_lowstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
                 rospy.loginfo("——————————————————————由LOWSTOP至进仓完成——————————————————————")
+                rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
+                for i in range(5):
+                    rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
+                rospy.logwarn("---------- 强制刷新缓冲区结束 ----------")
 
             else:
                 self.complete_state = False
@@ -694,7 +702,10 @@ class ServoDriveController:
                 self.is_upstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
                 rospy.loginfo("——————————————————————由UPSTOP至进仓完成——————————————————————")
-
+                rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
+                for i in range(5):
+                    rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
+                rospy.logwarn("---------- 强制刷新缓冲区结束 ----------")
             else:
                 self.complete_state = False
             if msg.sensor_b:
