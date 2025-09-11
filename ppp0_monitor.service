@@ -3,7 +3,7 @@ Description=Monitor 4G Connection
 After=network.target
 
 [Service]
-ExecStart=/home/orangepi/demo01/monitor_connection.sh
+ExecStart=/home/orangepi/demo01/ppp0_monitor.sh
 Restart=always
 User=orangepi
 StandardOutput=syslog
