@@ -1,5 +1,5 @@
 #!/bin/bash
-PPP_IFACE="ens33"  # ppp接口名称
+PPP_IFACE="ppp0"  # ppp接口名称
 
 # 检查4G连接状态
 check_4g_connection() {
