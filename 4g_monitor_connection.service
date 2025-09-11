@@ -1,0 +1,13 @@
+[Unit]
+Description=Monitor 4G Connection
+After=network.target
+
+[Service]
+ExecStart=/home/orangepi/demo01/monitor_connection.sh
+Restart=always
+User=orangepi
+StandardOutput=syslog
+StandardError=syslog
+
+[Install]
+WantedBy=multi-user.target
