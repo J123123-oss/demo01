@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PPP_IFACE="ppp0"
+PPP_IFACE="ppp0:"
 PING_TARGET="121.40.57.48"
 CHECK_INTERVAL=300
 MAX_FAILURES=3
@@ -30,8 +30,8 @@ while true; do
                 pon > /dev/null 2>&1
                 
                 # 等待30秒看是否连接成功
-                local timeout=30
-                local connected=false
+                timeout=30
+                connected=false
                 while [ $timeout -gt 0 ]; do
                     if ping -c 1 -W 2 $PING_TARGET > /dev/null 2>&1; then
                         echo "$(date): 重新拨号成功！跳出重拨循环"
