@@ -68,7 +68,7 @@ restart_4g() {
 # 等待网络连接
 wait_for_network() {
     echo "等待网络连接..."
-    local max_attempts=5000000
+    local max_attempts=500000000
     local attempts=0
     
     while [ $attempts -lt $max_attempts ]; do
