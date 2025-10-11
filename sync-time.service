@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync time via 4G module on boot
+After=multi-user.target  # 确保系统启动到多用户模式后执行
+
+[Service]
+Type=oneshot  # 仅执行一次
+ExecStart=/home/orangepi/demo01/time_sync.sh  # 替换为脚本实际路径
+
+[Install]
+WantedBy=multi-user.target
