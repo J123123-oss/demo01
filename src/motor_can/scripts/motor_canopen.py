@@ -54,6 +54,8 @@ class ServoDriveController:
             "UNLOADING", # 出仓
             "UPSTOP", # 上电机停
             "LOWSTOP", # 下电机停
+            "PISTON_OUT", #电缸伸出
+            "PISTON_IN", #电缸缩进
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
@@ -74,12 +76,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": 1600 * rate      #-1000 同向
+                "velocity_brush": -1600 * rate      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -1600 * rate      #1000 同向
+                "velocity_brush": 1600 * rate      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -110,10 +112,10 @@ class ServoDriveController:
                 "velocity_low": 0,
                 "velocity_brush": 0
             },
-            "ROLLER_ACCEL":{
+            "PISTON_OUT":{
                 #目前用与自动模式与手动模式的切换
             },
-            "ROLLER_DECEL":{
+            "PISTON_IN":{
                 #目前用于清空自动模式的状态 不符合逻辑，已禁用
                 #切换为重置初始偏航角
             }
@@ -198,7 +200,7 @@ class ServoDriveController:
         if new_state not in self.status_config:
             rospy.logwarn(f"尝试设置无效状态: {new_state}")
             return False
-        if new_state == self.current_status and new_state != "ROLLER_ACCEL" and new_state != "ROLLER_DECEL" and new_state != "STOP":
+        if new_state == self.current_status and new_state != "PISTON_OUT" and new_state != "PISTON_IN" and new_state != "STOP":
             return False  # 状态未改变
         # 检查是否从START切换到其他模式
         # if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
@@ -249,11 +251,11 @@ class ServoDriveController:
             if self.prev_motion_state is None:
                 self.prev_motion_state = self.last_state
         
-        elif new_state == "ROLLER_DECEL":#清空自动模式重置初始偏航角
+        elif new_state == "PISTON_IN":#清空自动模式重置初始偏航角
             # self.auto_step = None
             self.initial_yaw = None  # 重置初始偏航角与自动模式记录
             self.auto_step = None
-        elif new_state == "ROLLER_ACCEL": #切换手动与自动模式
+        elif new_state == "PISTON_OUT": #切换手动与自动模式
             if( self.count % 2 ):
                 self.auto_mode = False
                 rospy.loginfo("手动模式开")
@@ -668,7 +670,7 @@ class ServoDriveController:
                 # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
-                # self.initial_yaw = None  # 重置初始偏航角
+                self.initial_yaw = None  # 重置初始偏航角
                 self.progress = 100
                 self.auto_step = None
                 self.is_lowstop = False
@@ -696,7 +698,7 @@ class ServoDriveController:
                 # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
-                # self.initial_yaw = None  # 重置初始偏航角
+                self.initial_yaw = None  # 重置初始偏航角
                 self.progress = 100
                 self.auto_step = None
                 self.is_upstop = False
@@ -770,8 +772,9 @@ class ServoDriveController:
         
         # 积分限幅
         integral_max = 50   #300
-        self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
-        
+        self.pid_integral = 0
+        # self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
+        # print("pid_integral:",self.pid_integral)
         correction = (self.pid_kp * error +
                     self.pid_ki * self.pid_integral +
                     self.pid_kd * derivative)
@@ -879,7 +882,7 @@ class ServoDriveController:
             #         self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
 
-            angle_condition_met = (-5 < self.imu_yaw < -1.5 or 1.5 < self.imu_yaw < 5)
+            angle_condition_met = (-5 < self.imu_yaw < -1.0 or 1.0 < self.imu_yaw < 5)
         
             if angle_condition_met:
                 # 第一次检测到角度问题时记录时间

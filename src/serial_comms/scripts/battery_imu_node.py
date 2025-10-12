@@ -38,6 +38,8 @@ class BatteryAndIMUNode:
         self.loop_counter = 0
         self.battery_timeout = 0
         self.imu_timeout = 0
+        self.battery_retry_count = 0
+        self.max_battery_retry = 2  # 最多重试2次
         
         # 电池03指令请求帧 (DDA50300FFFD77)
         self.REQUEST_BASIC_FRAME = bytes.fromhex('DD A5 03 00 FF FD 77')
@@ -138,7 +140,7 @@ class BatteryAndIMUNode:
             
             # 发布电池状态
             self.battery_pub.publish(status_msg)
-            rospy.logdebug("Battery status published")
+            rospy.loginfo("Battery status published")
             return True
             
         except Exception as e:
@@ -171,27 +173,38 @@ class BatteryAndIMUNode:
             if self.current_state == STATE_WAITING_BATTERY:
                 if self.process_battery_buffer():
                     self.current_state = STATE_READY
+                    self.battery_retry_count = 0  # 重置重试计数
                 elif current_time >= self.battery_timeout:
-                    # rospy.logwarn("电池响应超时")
+                    rospy.logwarn(f"电池响应超时，重试次数: {self.battery_retry_count}")
                     self.battery_buffer.clear()
-                    self.current_state = STATE_READY
+                    self.battery_retry_count += 1
+                    # 若未超过最大重试次数，重新发送查询
+                    if self.battery_retry_count <= self.max_battery_retry:
+                        self.send_battery_query()
+                        self.battery_timeout = current_time + 2.0  # 重置超时
+                    else:
+                        # 重试耗尽，等待下一个30秒周期
+                        self.current_state = STATE_READY
+                        self.battery_retry_count = 0
             
             elif self.current_state == STATE_WAITING_IMU:
                 if self.process_imu_buffer():
                     self.current_state = STATE_READY
                 elif current_time >= self.imu_timeout:
-                    rospy.logdebug("IMU响应超时")
+                    rospy.loginfo("IMU响应超时")
                     self.imu_buffer.clear()
                     self.current_state = STATE_READY
             
             # === 发送新请求 ===
             if self.current_state == STATE_READY:
                 # 优先处理电池请求（1Hz）
-                if current_time - self.last_battery_sent >= 10.0:
+                # 电池查询（30秒周期）
+                if current_time - self.last_battery_sent >= 30.0:
+                    rospy.loginfo(f"触发电池查询（上次发送于{current_time - self.last_battery_sent:.1f}秒前）")
                     if self.send_battery_query():
                         self.last_battery_sent = current_time
                         self.current_state = STATE_WAITING_BATTERY
-                        self.battery_timeout = current_time + 1.0  # 最初是0.1s超时，改为0.5s后运行，目前1.0s
+                        self.battery_timeout = current_time + 2.0  # 最初是0.1s超时，改为0.5s后运行，目前1.0s
                 
                 # 其次处理IMU请求（50Hz）
                 elif current_time - self.last_imu_sent >= 0.02:
@@ -208,8 +221,14 @@ class BatteryAndIMUNode:
         """发送电池查询指令"""
         try:
             if self.ser and self.ser.is_open:
+                # 发送前清空缓冲区，避免旧数据干扰
+                self.battery_buffer.clear()
+                # 发送同步字节唤醒电池（可选，根据电池协议调整）
+                self.ser.write(b'\x00')  # 发送1个空字节预热总线
+                time.sleep(0.01)  # 短暂等待
+                # 发送实际查询指令
                 self.ser.write(self.REQUEST_BASIC_FRAME)
-                rospy.logdebug("已发送电池查询")
+                # rospy.loginfo("已发送电池查询（含预热）")
                 return True
         except Exception as e:
             rospy.logerr(f"电池查询发送失败: {e}")
@@ -220,7 +239,7 @@ class BatteryAndIMUNode:
         try:
             if self.ser and self.ser.is_open:
                 self.ser.write(self.REQ_IMU_FRAME)
-                rospy.logdebug("已发送IMU查询")
+                # rospy.loginfo("已发送IMU查询")
                 return True
         except Exception as e:
             rospy.logerr(f"IMU查询发送失败: {e}")
@@ -250,15 +269,30 @@ class BatteryAndIMUNode:
                             
                         # 4. 无效数据（丢弃）
                         else:
-                            rospy.logdebug(f"丢弃无效字节: 0x{byte:02X}")
+                            rospy.loginfo(f"丢弃无效字节: 0x{byte:02X}")
         except Exception as e:
             rospy.logwarn(f"串口读取错误: {e}")
 
 
     def process_battery_buffer(self):
-        """处理电池响应数据"""
-        # 查找帧头0xDD
-        start_idx = 0
+        MAX_BATTERY_FRAME_LEN = 64  # 最大帧长，防止缓冲区无限增长
+        # 1. 若缓冲区过长，直接清空（避免无效数据累积）
+        if len(self.battery_buffer) > MAX_BATTERY_FRAME_LEN:
+            rospy.logwarn(f"电池缓冲区过长，清空数据: {len(self.battery_buffer)}字节")
+            self.battery_buffer.clear()
+            return False
+        
+        # 2. 查找帧头0xDD，丢弃之前的无效数据
+        start_idx = self.battery_buffer.find(b'\xDD')
+        if start_idx == -1:
+            # 无帧头，清空缓冲区（30秒周期内可容忍）
+            self.battery_buffer.clear()
+            return False
+        elif start_idx > 0:
+            # 丢弃帧头前的无效数据
+            del self.battery_buffer[:start_idx]
+            start_idx = 0  # 帧头现在在0位置
+        # 3. 后续解析逻辑保持不变（检查指令码、长度、帧尾等）
         while start_idx < len(self.battery_buffer):
             if self.battery_buffer[start_idx] != 0xDD:
                 start_idx += 1
