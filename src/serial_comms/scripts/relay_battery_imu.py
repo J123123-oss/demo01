@@ -332,8 +332,8 @@ class BatteryIMURelayNode:
                     self.temperature_based_control()
                     self.last_relay_check = current_time
                 
-                # IMU查询（50Hz）
-                elif current_time - self.last_imu_sent >= 0.02:
+                # IMU查询（5Hz）
+                elif current_time - self.last_imu_sent >= 0.2:
                     if self.send_imu_query():
                         self.last_imu_sent = current_time
                         self.current_state = STATE_WAITING_IMU
