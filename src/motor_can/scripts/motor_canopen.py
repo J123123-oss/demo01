@@ -597,17 +597,22 @@ class ServoDriveController:
                         self.set_state("UNLOADING")
                         self.progress = 10
                         self.unloading_start_time = time.time()  # 记录开始时间
-        
-                    # 检查是否计时结束
-                    if hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
-                        current_time = time.time()
-                        if current_time - self.unloading_start_time >= self.unloading_timer:  # 使用固定的持续时间
-                            self.set_state("BACKWARD")
-                            self.progress = 20
-                            self.unloading_start_time = None  # 重置
+                        print("unloading_start_time:",self.unloading_start_time)
                 elif(not msg.sensor_a and not msg.sensor_c):
                     self.set_state("BACKWARD")
                     self.progress = 20
+        
+                # 在UNLOADING状态，检查定时器
+                if self.current_status == "UNLOADING":
+                    while hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
+                        current_time = time.time()
+                        elapsed = current_time - self.unloading_start_time
+                        # print(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
+                        
+                        if elapsed >= self.unloading_timer:
+                            self.set_state("BACKWARD")
+                            self.progress = 20
+                            self.unloading_start_time = None  # 重置
 
         
         # 在REVERSE状态下检测边界
@@ -1194,7 +1199,7 @@ class ServoDriveController:
                     # 处理符号位 (32位有符号整数)
                     if velocity > 0x7FFFFFFF:
                         velocity -= 0x100000000
-                    rospy.logwarn(f"读取电机 {motor_id} 实际速度 {int(velocity/68/20)}rpm ")
+                    # rospy.logwarn(f"读取电机 {motor_id} 实际速度 {int(velocity/68/20)}rpm ")
 
                     return velocity
         rospy.logwarn(f"读取电机 {motor_id} 实际速度超时")
