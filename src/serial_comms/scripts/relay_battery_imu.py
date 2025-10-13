@@ -8,6 +8,7 @@ import numpy as np
 from std_msgs.msg import Float32, Header, Bool, String
 from serial_comms.msg import BatteryStatus, INSPVAE
 from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
+import threading
 
 # 状态常量
 STATE_READY = 0
@@ -27,15 +28,18 @@ class BatteryIMURelayNode:
         self.imu_buffer = bytearray()
         
         # 温度控制参数
-        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 20.0)  # 高温阈值
+        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 15.0)  # 高温阈值
         self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 10.0)    # 低温阈值
-        self.check_interval = rospy.get_param('~check_interval', 10.0)             # 检查间隔
+        self.check_interval = rospy.get_param('~check_interval', 60.0)             # 继电器检查间隔
         self.current_relay_state = False  # 当前继电器状态
         
         # 获取串口参数
         port = rospy.get_param('~serial_port', '/dev/IMU')
         baudrate = rospy.get_param('~baudrate', 115200)
         self.relay_address = rospy.get_param('~relay_address', 0x02)
+        
+        # 添加串口访问锁，避免并发访问冲突
+        self.serial_lock = threading.Lock()
         
         # 初始化串口
         self.ser = None
@@ -51,7 +55,7 @@ class BatteryIMURelayNode:
         self.imu_timeout = 0
         self.relay_timeout = 0
         self.battery_retry_count = 0
-        self.max_battery_retry = 2
+        self.max_battery_retry = 3  # 增加重试次数
         
         # 电池03指令请求帧
         self.REQUEST_BASIC_FRAME = bytes.fromhex('DD A5 03 00 FF FD 77')
@@ -76,6 +80,12 @@ class BatteryIMURelayNode:
         
         # 电池温度数据
         self.current_temperatures = []
+        
+        # 添加统计信息
+        self.battery_query_count = 0
+        self.battery_success_count = 0
+        self.imu_query_count = 0
+        self.imu_success_count = 0
         
         rospy.loginfo("电池-IMU-继电器集成节点初始化完成")
 
@@ -186,6 +196,7 @@ class BatteryIMURelayNode:
             recv_crc = frame[-2:]
             calc_crc = self.calculate_crc(frame[:-2])
             if recv_crc != calc_crc:
+                rospy.logwarn("IMU数据CRC校验失败")
                 return None
             
             yaw_bytes = frame[3:5]
@@ -198,15 +209,17 @@ class BatteryIMURelayNode:
     def send_relay_command(self, command_data):
         """发送继电器命令"""
         try:
-            crc = self.calculate_crc(command_data)
-            full_command = command_data + crc
-            self.ser.write(full_command)
-            rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
-            
-            # 等待响应
-            time.sleep(0.05)
-            response = self.ser.read(8)
-            
+            # 使用锁保护串口访问
+            with self.serial_lock:
+                crc = self.calculate_crc(command_data)
+                full_command = command_data + crc
+                self.ser.write(full_command)
+                rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
+                
+                # 等待响应
+                time.sleep(0.05)
+                response = self.ser.read(8)
+                
             if len(response) > 0:
                 rospy.loginfo("接收继电器响应: %s", ' '.join(['%02X' % b for b in response]))
                 if len(response) >= 7 and response[:6] == command_data:
@@ -218,22 +231,29 @@ class BatteryIMURelayNode:
 
     def enable_relay(self, enable=True):
         """开启或关闭继电器"""
-        if enable:
-            command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
-            rospy.loginfo("发送继电器开启命令")
-        else:
-            command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0x00, 0x00])
-            rospy.loginfo("发送继电器关闭命令")
+        max_retries = 3
+        for attempt in range(max_retries):
+            if enable:
+                command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
+                rospy.loginfo("发送继电器开启命令")
+            else:
+                command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0x00, 0x00])
+                rospy.loginfo("发送继电器关闭命令")
+            
+            success = self.send_relay_command(command_data)
+            if success:
+                self.current_relay_state = enable
+                # 发布继电器状态
+                status_msg = Bool()
+                status_msg.data = self.current_relay_state
+                self.relay_status_pub.publish(status_msg)
+                return True
+            else:
+                rospy.logwarn(f"继电器命令发送失败，重试 {attempt + 1}/{max_retries}")
+                time.sleep(0.1)  # 等待后重试
         
-        success = self.send_relay_command(command_data)
-        if success:
-            self.current_relay_state = enable
-            # 发布继电器状态
-            status_msg = Bool()
-            status_msg.data = self.current_relay_state
-            self.relay_status_pub.publish(status_msg)
-        
-        return success
+        rospy.logerr("继电器命令发送失败，已达到最大重试次数")
+        return False
 
     def read_relay_status(self):
         """读取继电器状态"""
@@ -241,13 +261,15 @@ class BatteryIMURelayNode:
         rospy.loginfo("发送继电器状态查询")
         
         try:
-            crc = self.calculate_crc(command_data)
-            full_command = command_data + crc
-            self.ser.write(full_command)
-            
-            time.sleep(0.05)
-            response = self.ser.read(8)
-            
+            # 使用锁保护串口访问
+            with self.serial_lock:
+                crc = self.calculate_crc(command_data)
+                full_command = command_data + crc
+                self.ser.write(full_command)
+                
+                time.sleep(0.05)
+                response = self.ser.read(8)
+                
             if response and len(response) >= 6:
                 if response[0] == self.relay_address and response[1] == 0x01:
                     byte_count = response[2]
@@ -287,74 +309,108 @@ class BatteryIMURelayNode:
                 rospy.logwarn("继电器开启失败")
 
     def run(self):
-        """主状态机循环"""
+        """改进的主状态机循环 - 非阻塞版本"""
+        rospy.loginfo("节点主循环开始运行")
         while not rospy.is_shutdown():
             current_time = time.time()
             
-            # 处理超时状态
+            # === 优先处理串口数据读取 ===
+            self.read_serial_data()
+            
+            # === 并行处理所有等待状态 ===
+            # 1. 处理电池响应（不阻塞其他状态）
             if self.current_state == STATE_WAITING_BATTERY:
                 if self.process_battery_buffer():
                     self.current_state = STATE_READY
                     self.battery_retry_count = 0
+                    self.battery_success_count += 1
+                    rospy.loginfo("电池数据接收完成")
                 elif current_time >= self.battery_timeout:
                     rospy.logwarn(f"电池响应超时，重试次数: {self.battery_retry_count}")
                     self.battery_buffer.clear()
                     self.battery_retry_count += 1
                     if self.battery_retry_count <= self.max_battery_retry:
-                        self.send_battery_query()
-                        self.battery_timeout = current_time + 1.0
+                        if self.send_battery_query():
+                            self.battery_timeout = current_time + 1.0  # 1秒超时
+                        else:
+                            rospy.logerr("电池查询发送失败")
                     else:
                         self.current_state = STATE_READY
                         self.battery_retry_count = 0
+                        rospy.logwarn("电池查询重试次数用尽，返回就绪状态")
             
-            elif self.current_state == STATE_WAITING_IMU:
+            # 2. 处理IMU响应（独立于电池状态）
+            if self.current_state == STATE_WAITING_IMU:
                 if self.process_imu_buffer():
                     self.current_state = STATE_READY
+                    self.imu_success_count += 1
                 elif current_time >= self.imu_timeout:
+                    # IMU超时不阻塞，直接清除状态
                     self.imu_buffer.clear()
                     self.current_state = STATE_READY
+                    rospy.loginfo("IMU响应超时")
             
-            elif self.current_state == STATE_WAITING_RELAY:
-                # 继电器命令通常是即时完成的
-                self.current_state = STATE_READY
+            # 3. 处理继电器响应
+            if self.current_state == STATE_WAITING_RELAY:
+                # 继电器响应通常是即时的，短暂等待后返回就绪
+                if current_time >= self.relay_timeout:
+                    self.current_state = STATE_READY
+                    rospy.logwarn("继电器响应超时")
             
-            # 发送新请求
+            # === 发送新请求（优化优先级）===
             if self.current_state == STATE_READY:
-                # 电池查询（60秒周期）
-                if current_time - self.last_battery_sent >= self.check_interval:
+                # 优先处理IMU查询（最高优先级）
+                if current_time - self.last_imu_sent >= 0.02:  # 50Hz
+                    if self.send_imu_query():
+                        self.last_imu_sent = current_time
+                        self.imu_query_count += 1
+                        self.current_state = STATE_WAITING_IMU
+                        self.imu_timeout = current_time + 0.1  # 100ms超时
+                    else:
+                        rospy.logerr("IMU查询发送失败")
+                
+                # 其次处理电池查询（低优先级）
+                elif current_time - self.last_battery_sent >= 30.0:
                     if self.send_battery_query():
                         self.last_battery_sent = current_time
+                        self.battery_query_count += 1
                         self.current_state = STATE_WAITING_BATTERY
-                        self.battery_timeout = current_time + 1.0
+                        self.battery_timeout = current_time + 1.0  # 1秒超时
+                    else:
+                        rospy.logerr("电池查询发送失败")
                 
-                # 继电器温度控制（60秒周期）
+                # 最后处理继电器温度控制（最低优先级）
                 elif current_time - self.last_relay_check >= self.check_interval:
                     self.temperature_based_control()
                     self.last_relay_check = current_time
-                
-                # IMU查询（5Hz）
-                elif current_time - self.last_imu_sent >= 0.2:
-                    if self.send_imu_query():
-                        self.last_imu_sent = current_time
-                        self.current_state = STATE_WAITING_IMU
-                        self.imu_timeout = current_time + 0.01
+                    
+                    # 定期输出统计信息
+                    if self.battery_query_count > 0:
+                        battery_success_rate = (self.battery_success_count / self.battery_query_count) * 100
+                        rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
+                    
+                    if self.imu_query_count > 0:
+                        imu_success_rate = (self.imu_success_count / self.imu_query_count) * 100
+                        rospy.loginfo(f"IMU查询成功率: {imu_success_rate:.2f}% ({self.imu_success_count}/{self.imu_query_count})")
             
-            # 持续读取串口
-            self.read_serial_data()
-            # print("current_state:",self.current_state)
             self.rate.sleep()
 
-    # 以下方法保持与原始代码相同（send_battery_query, send_imu_query, read_serial_data, 
-    # process_battery_buffer, process_imu_buffer等）
     def send_battery_query(self):
         """发送电池查询指令"""
         try:
             if self.ser and self.ser.is_open:
-                self.battery_buffer.clear()
-                self.ser.write(b'\x00')
-                time.sleep(0.01)
-                self.ser.write(self.REQUEST_BASIC_FRAME)
+                # 使用锁保护串口访问
+                with self.serial_lock:
+                    self.battery_buffer.clear()
+                    self.ser.write(b'\x00')
+                    time.sleep(0.01)
+                    self.ser.write(self.REQUEST_BASIC_FRAME)
                 return True
+        except serial.SerialException as e:
+            rospy.logerr(f"电池查询发送失败（串口异常）: {e}")
+            # 尝试重新初始化串口
+            if self.reinit_serial():
+                return False  # 重新初始化后下次再试
         except Exception as e:
             rospy.logerr(f"电池查询发送失败: {e}")
         return False
@@ -363,28 +419,88 @@ class BatteryIMURelayNode:
         """发送IMU查询指令"""
         try:
             if self.ser and self.ser.is_open:
-                self.ser.write(self.REQ_IMU_FRAME)
+                # 使用锁保护串口访问
+                with self.serial_lock:
+                    self.ser.write(self.REQ_IMU_FRAME)
                 return True
+        except serial.SerialException as e:
+            rospy.logerr(f"IMU查询发送失败（串口异常）: {e}")
+            # 尝试重新初始化串口
+            if self.reinit_serial():
+                return False  # 重新初始化后下次再试
         except Exception as e:
             rospy.logerr(f"IMU查询发送失败: {e}")
         return False
 
+    def reinit_serial(self):
+        """重新初始化串口"""
+        try:
+            if self.ser:
+                self.ser.close()
+        except:
+            pass
+        
+        try:
+            port = rospy.get_param('~serial_port', '/dev/IMU')
+            baudrate = rospy.get_param('~baudrate', 115200)
+            self.ser = serial.Serial(
+                port=port,
+                baudrate=baudrate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0.01
+            )
+            rospy.loginfo("串口重新初始化成功")
+            return True
+        except Exception as e:
+            rospy.logerr(f"串口重新初始化失败: {e}")
+            self.ser = None
+            return False
+
     def read_serial_data(self):
-        """从串口读取可用数据"""
+        """改进的串口读取，确保及时处理所有数据"""
         try:
             if self.ser and self.ser.is_open:
-                avail = self.ser.in_waiting
-                if avail > 0:
-                    data = self.ser.read(avail)
-                    for byte in data:
-                        if byte == 0xDD:
-                            self.battery_buffer.append(byte)
-                        elif byte == 0x50:
-                            self.imu_buffer.append(byte)
-                        elif len(self.battery_buffer) > 0:
-                            self.battery_buffer.append(byte)
-                        elif len(self.imu_buffer) > 0:
-                            self.imu_buffer.append(byte)
+                # 使用锁保护串口访问
+                with self.serial_lock:
+                    # 多次读取直到清空缓冲区
+                    for _ in range(3):  # 最多读取3次
+                        avail = self.ser.in_waiting
+                        if avail == 0:
+                            break
+                            
+                        data = self.ser.read(avail)
+                        for byte in data:
+                            if isinstance(byte, int):
+                                byte_val = byte
+                            else:
+                                byte_val = ord(byte)
+                                
+                            # 改进的数据帧分类处理，避免冲突
+                            # 根据帧头类型分别处理
+                            if byte_val == 0xDD:
+                                # 电池数据帧开始
+                                self.battery_buffer.clear()  # 清除之前的不完整数据
+                                self.battery_buffer.append(byte_val)
+                            elif byte_val == 0x50:
+                                # IMU数据帧开始
+                                self.imu_buffer.clear()  # 清除之前的不完整数据
+                                self.imu_buffer.append(byte_val)
+                            elif len(self.battery_buffer) > 0 and len(self.battery_buffer) < 100:
+                                # 继续收集电池数据，设置合理上限避免无限增长
+                                self.battery_buffer.append(byte_val)
+                            elif len(self.imu_buffer) > 0 and len(self.imu_buffer) < 20:
+                                # 继续收集IMU数据，设置合理上限避免无限增长
+                                self.imu_buffer.append(byte_val)
+                            # 可以添加其他设备的数据处理
+                        
+                        # 短暂休息避免过度占用CPU
+                        time.sleep(0.001)
+                    
+        except serial.SerialException as e:
+            rospy.logerr(f"串口读取异常: {e}")
+            self.reinit_serial()
         except Exception as e:
             rospy.logwarn(f"串口读取错误: {e}")
 
@@ -428,7 +544,7 @@ class BatteryIMURelayNode:
             data_block = self.battery_buffer[data_start:data_end]
             
             success = self.process_battery_response(data_block)
-            del self.battery_buffer[:start_idx + full_length]
+            self.battery_buffer.clear()  # 清空整个缓冲区
             return success
         
         return False
@@ -453,7 +569,7 @@ class BatteryIMURelayNode:
                 msg.header = Header(stamp=rospy.Time.now(), frame_id='inspvae')
                 msg.yaw = result['yaw'] % 360
                 self.imu_pub.publish(msg)
-                del self.imu_buffer[:frame_end]
+                self.imu_buffer.clear()  # 清空整个缓冲区
                 return True
             
             start_idx += 1
@@ -489,3 +605,5 @@ if __name__ == '__main__':
         node.run()
     except rospy.ROSInterruptException:
         pass
+    except Exception as e:
+        rospy.logerr(f"节点运行异常: {e}")
