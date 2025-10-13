@@ -38,7 +38,8 @@ class ServoDriveController:
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
-        self.start_timer = None
+        self.unloading_timer = 10.0
+        self.unloading_start_time = None
         self.start_time = 0
         self.elevator_stage = 0  # 电缸升降阶段: 0=待抬升,1=抬升中,2=抬升完成
         self.elevator_start_time = 0
@@ -81,7 +82,7 @@ class ServoDriveController:
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": 1600 * rate      #1000 同向
+                "velocity_brush": -1600 * rate      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -90,7 +91,7 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 1600 * rate
+                "velocity_brush": -1600 * rate   #1600
             },
             "UNLOADING":{
                 "velocity_up": -self.motor_base *rate,
@@ -435,6 +436,39 @@ class ServoDriveController:
         ]
         # print(f"设置电机 {motor_id} 目标速度: {velocity} RPM")
         self.send_command(motor_id, data)
+
+    def get_actual_velocity(self, motor_id):
+        """
+        读取电机的实际运行速度 (606Ch, 单位: puu/s)
+        :param motor_id: 电机ID
+        :return: 实际速度值 (脉冲/秒)，读取失败返回None
+        """
+        # 发送读取606Ch的指令，16字节响应数据
+        self.send_command(motor_id, [0x40, 0x6C, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        
+        # 等待接收响应
+        start_time = time.time()
+        while time.time() - start_time < 0.5:  # 超时500ms
+            msg = self.bus.recv(timeout=0.1)  # 等待最多0.1秒
+            if msg and msg.arbitration_id == (0x580 + motor_id):
+                # 检查是否为有效的606Ch响应
+                if len(msg.data) >= 8 and msg.data[0] == 0x43:
+                    # 解析32位速度值 (Int32)
+                    velocity = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
+                    
+                    # 判断数值是否为负数（16位有符号数）
+                    if velocity > 0x7FFFFFFF:
+                        velocity -= 0x100000000
+
+                    # 转换为速度（RPM）
+                    # 注意：1 RPM = 68 pulses per second（因为rate = 68 Hz）
+                    rpm = abs(velocity) / 68
+                
+                    rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} puu/s | 约 {rpm} rpm")
+                    return velocity  # 返回32位整数形式
+        rospy.logwarn(f"读取电机 {motor_id} 当前速度失败")
+        return None
+
     
     def set_acceleration(self, motor_id, acceleration):
         data = [
@@ -558,11 +592,23 @@ class ServoDriveController:
             # 检测起始位置，进入第一步动作，有待测试
             if self.elevator_stage == 2:
                 if (msg.sensor_a or msg.sensor_c): #仅一个就可以开启自动
-                # if (msg.sensor_a and msg.sensor_c):
+                    #定时出仓，等待10秒后进入后退
+                    if self.current_status != "UNLOADING":
+                        self.set_state("UNLOADING")
+                        self.progress = 10
+                        self.unloading_start_time = time.time()  # 记录开始时间
+        
+                    # 检查是否计时结束
+                    if hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
+                        current_time = time.time()
+                        if current_time - self.unloading_start_time >= self.unloading_timer:  # 使用固定的持续时间
+                            self.set_state("BACKWARD")
+                            self.progress = 20
+                            self.unloading_start_time = None  # 重置
+                elif(not msg.sensor_a and not msg.sensor_c):
                     self.set_state("BACKWARD")
-                    self.progress = 10
-                else:
-                    rospy.logwarn("未检测到起始位置，保持等待...")
+                    self.progress = 20
+
         
         # 在REVERSE状态下检测边界
         if self.current_status == "REVERSE":
@@ -905,9 +951,9 @@ class ServoDriveController:
 
 
             # 实时发布状态
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed
+            # self.current_velocity_up = left_speed
+            # self.current_velocity_low = right_speed
+            # self.current_velocity_brush = brush_speed
 
         # 3. 反向调整状态
         elif self.current_status == "REVERSE":
@@ -995,9 +1041,9 @@ class ServoDriveController:
                     self.has_reverse_flag = False  # 重置标志位
                     # self.has_reverse_counter = 0  # 重置后退计数器
             
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed
+            # self.current_velocity_up = left_speed
+            # self.current_velocity_low = right_speed
+            # self.current_velocity_brush = brush_speed
 
         # 4. UPSTOP/LOWSTOP状态：IMU矫正+保持切换前速度
         elif self.current_status == "UPSTOP":
@@ -1015,9 +1061,9 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed               
+            # self.current_velocity_up = left_speed
+            # self.current_velocity_low = right_speed
+            # self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
             # left_speed = int(self.speed_pluse_max * 1) # 上电机保持切换前速度 
             left_speed =  self.current_velocity_up  # 上电机保持切换前速度 
@@ -1034,9 +1080,9 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
            
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed
+            # self.current_velocity_up = left_speed
+            # self.current_velocity_low = right_speed
+            # self.current_velocity_brush = brush_speed
 
         # 5. STOP状态或IMU角度异常
         elif self.current_status == "STOP" or not -5 < self.imu_yaw < 5:
@@ -1059,9 +1105,9 @@ class ServoDriveController:
                 self.need_speed_mode_init = True
 
 
-            self.current_velocity_low = 0
-            self.current_velocity_up = 0
-            self.current_velocity_brush = 0
+            # self.current_velocity_low = 0
+            # self.current_velocity_up = 0
+            # self.current_velocity_brush = 0
             # self.publish_state()
         elif self.current_status == "START":
             config = self.status_config["START"]
@@ -1085,10 +1131,10 @@ class ServoDriveController:
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
 
-            # 实时发布状态
-            self.current_velocity_up = left_speed
-            self.current_velocity_low = right_speed
-            self.current_velocity_brush = brush_speed
+        # 实时发布状态
+        self.current_velocity_up = self.get_actual_velocity(3)
+        self.current_velocity_low = self.get_actual_velocity(2)
+        self.current_velocity_brush = self.get_actual_velocity(4)
     
     def delayed_publish_freq_switch(self, delay_sec=3):
         # 延时后切换到低频率

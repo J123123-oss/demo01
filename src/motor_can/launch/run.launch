@@ -16,7 +16,13 @@
         <param name="~topic_result" value="robot/$(arg robot_ID)/result"/>
 
     </node>
-    <node pkg="serial_comms" type="battery_imu_node.py" name="battery_imu_node"  />
+    <!-- <node pkg="serial_comms" type="battery_imu_node.py" name="battery_imu_node"  /> -->
+    <node pkg="serial_comms" type="relay_battery_imu.py" name="relay_battery_imu" output="screen" >
+    <!-- 高温阈值  |    高温阈值  |    检查间隔 -->
+        <param name="~temperature_threshold_high" value="15.0"/>
+        <param name="~temperature_threshold_low" value="10.0"/>
+        <param name="~check_interval" value="20.0"/>
+    </node>
     <!-- <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen"> -->
         <!-- <param name="port" value="/dev/SENSOR0"/> -->
         <!-- <param name="baudrate" value="115200"/> -->

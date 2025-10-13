@@ -21,9 +21,12 @@ class BatteryMonitor:
         
         # 03指令请求帧 (DDA50300FFFD77)
         self.REQUEST_BASIC_FRAME = bytes.fromhex('DD A5 03 00 FF FD 77')
-        # 测试继电器温控
+        # 开关测试继电器温控
         # self.REQUEST_BASIC_FRAME = bytes.fromhex('02 05 00 00 FF 00 8C 09')
         # self.REQUEST_BASIC_FRAME = bytes.fromhex('02 05 00 00 00 00 CD F9')
+        # 继电器状态查询
+        # self.REQUEST_BASIC_FRAME = bytes.fromhex('02 01 00 00 00 08 3D FF')
+
 
 
     def parse_date(self, raw_date):
