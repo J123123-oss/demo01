@@ -5,7 +5,7 @@ import time
 import yaml
 import rospy
 import json
-from std_msgs.msg import String, Int8, Float32, Float32MultiArray
+from std_msgs.msg import String, Int8, Float32, Float32MultiArray,Bool
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
@@ -38,7 +38,7 @@ class ServoDriveController:
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
-        self.unloading_timer = 10.0
+        self.unloading_timer = 20.0
         self.unloading_start_time = None
         self.start_time = 0
         self.elevator_stage = 0  # 电缸升降阶段: 0=待抬升,1=抬升中,2=抬升完成
@@ -185,12 +185,15 @@ class ServoDriveController:
         self.progress = 0   # 进度百分比，0-100
         self.battery_remaining = None # 电池百分比
         self.battery_temperatures = [] # 电池温度，共3个
+        #继电器状态
+        self.relay_status = None
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
+        rospy.Subscriber('/relay_status', Bool, self.relay_callback)
 
         # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
 
@@ -360,9 +363,8 @@ class ServoDriveController:
             "comm_module": True  },
             "complete_state":self.complete_state, # 任务完成状态
             "auto_mode": self.auto_mode, # 自动模式开关,默认开
+            "relay_status": self.relay_status,
             # "auto_step": self.auto_step, # 当前自动程序所在状态
-
-
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
         }
         self.state_pub.publish(json.dumps(state_msg))
@@ -415,6 +417,9 @@ class ServoDriveController:
 
         self.battery_remaining = msg.batttery_remaining  # 电池百分比
         self.battery_temperatures = msg.temperatures  # 电池温度，共3个
+    def relay_callback(self, msg):
+        #继电器状态
+        self.relay_status = msg.data
 
 
     def send_command(self, motor_id, command_data):
@@ -913,8 +918,8 @@ class ServoDriveController:
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-                rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
+                # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
                 self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
@@ -1346,7 +1351,10 @@ class ServoDriveController:
             # 2. 非故障情况监控
             # 读取当前转矩
             actual_torque = self.get_actual_torque(motor_id)
-            
+            if self.get_actual_velocity(motor_id) == 0:
+                self.motor_driver = False
+            else:
+                self.motor_driver = True
             # 获取配置的最大转矩
             max_torque = self.get_max_torque(motor_id)
             if max_torque is not None and actual_torque is not None:

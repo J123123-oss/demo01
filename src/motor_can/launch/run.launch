@@ -21,7 +21,8 @@
     <!-- 高温阈值  |    高温阈值  |    检查间隔 -->
         <param name="~temperature_threshold_high" value="15.0"/>
         <param name="~temperature_threshold_low" value="10.0"/>
-        <param name="~check_interval" value="20.0"/>
+        <param name="~battery_check_interval" value="60.0"/>
+        <param name="~relay_check_interval" value="180.0"/>
     </node>
     <!-- <node pkg="serial_comms" type="distance_publisher_node.py" name="distance_publisher_node" output="screen"> -->
         <!-- <param name="port" value="/dev/SENSOR0"/> -->

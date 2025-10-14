@@ -30,7 +30,8 @@ class BatteryIMURelayNode:
         # 温度控制参数
         self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 15.0)  # 高温阈值
         self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 10.0)    # 低温阈值
-        self.check_interval = rospy.get_param('~check_interval', 60.0)             # 继电器检查间隔
+        self.battery_check_interval = rospy.get_param('~battery_check_interval', 60.0)             # 电池检查间隔
+        self.relay_check_interval = rospy.get_param('~relay_check_interval', 180.0)             # 继电器检查间隔
         self.current_relay_state = False  # 当前继电器状态
         
         # 获取串口参数
@@ -307,7 +308,10 @@ class BatteryIMURelayNode:
                 rospy.loginfo("继电器已开启")
             else:
                 rospy.logwarn("继电器开启失败")
-
+        # 发布继电器状态
+        status_msg = Bool()
+        status_msg.data = self.current_relay_state
+        self.relay_status_pub.publish(status_msg)
     def run(self):
         """改进的主状态机循环 - 非阻塞版本"""
         rospy.loginfo("节点主循环开始运行")
@@ -322,22 +326,22 @@ class BatteryIMURelayNode:
             if self.current_state == STATE_WAITING_BATTERY:
                 if self.process_battery_buffer():
                     self.current_state = STATE_READY
-                    self.battery_retry_count = 0
+                    # self.battery_retry_count = 0
                     self.battery_success_count += 1
-                    rospy.loginfo("电池数据接收完成")
+                    # rospy.loginfo("电池数据接收完成")
                 elif current_time >= self.battery_timeout:
-                    rospy.logwarn(f"电池响应超时，重试次数: {self.battery_retry_count}")
+                    # rospy.logwarn(f"电池响应超时，重试次数: {self.battery_retry_count}")
                     self.battery_buffer.clear()
-                    self.battery_retry_count += 1
-                    if self.battery_retry_count <= self.max_battery_retry:
-                        if self.send_battery_query():
-                            self.battery_timeout = current_time + 1.0  # 1秒超时
-                        else:
-                            rospy.logerr("电池查询发送失败")
-                    else:
-                        self.current_state = STATE_READY
-                        self.battery_retry_count = 0
-                        rospy.logwarn("电池查询重试次数用尽，返回就绪状态")
+                    # self.battery_retry_count += 1
+                    # if self.battery_retry_count <= self.max_battery_retry:
+                        # if self.send_battery_query():
+                            # self.battery_timeout = current_time + 1.0  # 1秒超时
+                        # else:
+                            # rospy.logerr("电池查询发送失败")
+                    # else:
+                    self.current_state = STATE_READY
+                        # self.battery_retry_count = 0
+                        # rospy.logwarn("电池查询重试次数用尽，返回就绪状态")
             
             # 2. 处理IMU响应（独立于电池状态）
             if self.current_state == STATE_WAITING_IMU:
@@ -370,7 +374,7 @@ class BatteryIMURelayNode:
                         rospy.logerr("IMU查询发送失败")
                 
                 # 其次处理电池查询（低优先级）
-                elif current_time - self.last_battery_sent >= 30.0:
+                elif current_time - self.last_battery_sent >= self.battery_check_interval:
                     if self.send_battery_query():
                         self.last_battery_sent = current_time
                         self.battery_query_count += 1
@@ -380,7 +384,7 @@ class BatteryIMURelayNode:
                         rospy.logerr("电池查询发送失败")
                 
                 # 最后处理继电器温度控制（最低优先级）
-                elif current_time - self.last_relay_check >= self.check_interval:
+                elif current_time - self.last_relay_check >= self.relay_check_interval:
                     self.temperature_based_control()
                     self.last_relay_check = current_time
                     
@@ -471,29 +475,32 @@ class BatteryIMURelayNode:
                             break
                             
                         data = self.ser.read(avail)
+                        if data:
+                            # 打印原始数据
+                            hex_str = ' '.join(['%02X' % (b if isinstance(b, int) else ord(b)) for b in data])
+                            # rospy.loginfo(f"收到485原始数据: {hex_str}")
+
                         for byte in data:
                             if isinstance(byte, int):
                                 byte_val = byte
                             else:
                                 byte_val = ord(byte)
-                                
-                            # 改进的数据帧分类处理，避免冲突
-                            # 根据帧头类型分别处理
+
+                            # 分类打印
                             if byte_val == 0xDD:
-                                # 电池数据帧开始
-                                self.battery_buffer.clear()  # 清除之前的不完整数据
+                                rospy.loginfo("检测到电池数据帧头")
+                                self.battery_buffer.clear()
                                 self.battery_buffer.append(byte_val)
                             elif byte_val == 0x50:
-                                # IMU数据帧开始
-                                self.imu_buffer.clear()  # 清除之前的不完整数据
+                                # rospy.loginfo("检测到IMU数据帧头")
+                                self.imu_buffer.clear()
                                 self.imu_buffer.append(byte_val)
                             elif len(self.battery_buffer) > 0 and len(self.battery_buffer) < 100:
-                                # 继续收集电池数据，设置合理上限避免无限增长
                                 self.battery_buffer.append(byte_val)
                             elif len(self.imu_buffer) > 0 and len(self.imu_buffer) < 20:
-                                # 继续收集IMU数据，设置合理上限避免无限增长
                                 self.imu_buffer.append(byte_val)
-                            # 可以添加其他设备的数据处理
+                            else:
+                                rospy.loginfo(f"收到其他类型数据: {byte_val:02X}")
                         
                         # 短暂休息避免过度占用CPU
                         time.sleep(0.001)
