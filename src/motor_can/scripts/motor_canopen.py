@@ -47,16 +47,18 @@ class ServoDriveController:
 
         #设置状态列表
         self.status_list = [
-            "STOP",  # 停止状态
+            "STOP",  # 停止状态[默认状态]
             "FORWARD",  # 前进状态
             "BACKWARD",  # 后退状态
-            "START",  # 速度模式初始化并使能
+            "START",  # 速度模式初始化并使能[3]
             "LOADING", # 进仓
             "UNLOADING", # 出仓
             "UPSTOP", # 上电机停
             "LOWSTOP", # 下电机停
             "PISTON_OUT", #电缸伸出
             "PISTON_IN", #电缸缩进
+            "CHARGING", #充电状态     [10]
+            "UNCHARGING" #取消充电    [11]
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
@@ -249,7 +251,6 @@ class ServoDriveController:
             if self.current_status != "REVERSE":  # 添加这个条件
                 self.prev_motion_state = new_state  # 保存当前要进入的状态，而不是last_state
             # rospy.loginfo(f"保存的运动状态: {self.prev_motion_state}")
-         
         # 进入反向调整、单侧停止时，记录当前运动状态
         if new_state in ["REVERSE", "UPSTOP", "LOWSTOP"]:
             if self.prev_motion_state is None:
@@ -591,6 +592,28 @@ class ServoDriveController:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
+        if self.auto_mode and self.current_status == "CHARGING": 
+            if self.elevator_stage == 2:
+                if (msg.sensor_a or msg.sensor_c): #仅一个就可以开启自动
+                    #定时出仓，等待10秒后进入后退
+                    if self.current_status != "UNLOADING":
+                        self.set_state("UNLOADING")
+                        self.progress = 10
+                        self.unloading_start_time = time.time()  # 记录开始时间
+                        print("unloading_start_time:",self.unloading_start_time)
+                else:
+                    rospy.loginfo("充电状态，等待接近开关触发")
+                # 在UNLOADING状态，检查定时器
+                if self.current_status == "UNLOADING":
+                    while hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
+                        current_time = time.time()
+                        elapsed = current_time - self.unloading_start_time
+                        # print(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
+                        
+                        if elapsed >= self.unloading_timer:
+                            self.set_state("STOP")
+                            self.progress = 0
+                            self.unloading_start_time = None  # 重置
 
         #自动模式第一步 >> START
         if self.auto_mode and self.current_status == "START": 
@@ -841,7 +864,7 @@ class ServoDriveController:
     def execute_state(self, event=None):
         # 实时根据当前状态和IMU矫正上下轮速度
         # 1. START状态：速度模式初始化电机
-        if self.enable_drive_flag and self.current_status == "START":
+        if self.enable_drive_flag and (self.current_status in self.status_list[3,10,11]):  # START, CHARGING, UNCHARGING
             if self.battery_remaining is not None and self.battery_remaining < self.LOW_BATTERY_THRESHOLD:
                 rospy.logerr("电池电量过低，无法启动电机！请充电后重试!")
                 self.enable_drive_flag = False
@@ -894,7 +917,7 @@ class ServoDriveController:
                 else:
                     # 实时显示剩余时间
                     remaining = max(0, 20 - elapsed)
-                    rospy.loginfo(f"等待电缸抬起: 还剩 {remaining:.1f}秒")
+                    # rospy.loginfo(f"等待电缸抬起: 还剩 {remaining:.1f}秒")
         
         # 阶段2: 自动恢复：等待20秒后开始自动模式第一步
         # if self.elevator_stage == 2:
@@ -904,6 +927,10 @@ class ServoDriveController:
             #     rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
             #     self.set_state(self.auto_step)
             # return
+            
+        # 取消充电返回仓内
+        if self.current_status == "UNCHARGING":
+            self.set_state("FORWARD")
 
         # 2. FORWARD/BACKWARD状态：IMU矫正
         if self.current_status in ["FORWARD", "BACKWARD"]:
@@ -1286,7 +1313,10 @@ class ServoDriveController:
         """读取电机故障码"""
         # 发送读取故障码指令
         self.send_command(motor_id, [0x40, 0x3F, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
-        
+        if self.get_actual_velocity(motor_id) == 0:
+                self.motor_driver = False
+        else:
+            self.motor_driver = True
         # 接收回复
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 500ms超时

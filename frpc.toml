@@ -3,6 +3,9 @@ serverAddr = "121.40.57.48"
 serverPort = 7000
 auth.token = "giifen" 
 #必须与 frps的 token⼀致
+# 心跳配置
+heartbeatInterval = 60
+heartbeatTimeout = 120
 # SSH隧道配置
 [[proxies]]
 name = "ssh-orangepi-baihuiyuan"
