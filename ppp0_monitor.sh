@@ -27,7 +27,7 @@ while true; do
                 poff > /dev/null 2>&1
                 pkill -f pppd > /dev/null 2>&1
                 sleep 3
-                pon > /dev/null 2>&1
+                # pon > /dev/null 2>&1
                 
                 # 等待30秒看是否连接成功
                 timeout=30
@@ -45,6 +45,7 @@ while true; do
                 
                 echo "$(date): 拨号失败，10秒后再次尝试..."
                 sleep 10
+                reboot
             done
         else
             sleep 5

@@ -1208,7 +1208,8 @@ class ServoDriveController:
 
                     return velocity
         # rospy.logwarn(f"读取电机 {motor_id} 实际速度超时")
-        self.motor_driver = False
+        if self.current_status != "STOP":
+            self.motor_driver = False
         return 0
     def get_actual_torque(self, motor_id):
         """

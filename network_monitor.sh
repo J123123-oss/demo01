@@ -1,7 +1,7 @@
 #!/bin/bash
 # conservative_network.sh
 
-CHECK_INTERVAL=10  # 更长的检测间隔
+CHECK_INTERVAL=600  # 更长的检测间隔
 TARGET_IP="121.40.57.48"
 
 echo "保守网络切换脚本启动..."

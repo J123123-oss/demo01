@@ -3,6 +3,7 @@ Description=Monitor 4G Connection
 After=network.target
 
 [Service]
+ExecStartPre=/bin/sleep 60
 ExecStart=/home/orangepi/demo01/ppp0_monitor.sh
 Restart=always
 User=orangepi
