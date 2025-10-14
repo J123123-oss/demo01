@@ -1,0 +1,21 @@
+[Unit]
+Description=4G Module Time Sync Service (Delayed 1 minute)
+After=network.target
+ # 确保网络相关服务启动后再执行（可选，增强稳定性）
+Wants=network.target
+
+[Service]
+Type=oneshot
+  # 一次性执行（非后台运行）
+ExecStartPre=/bin/sleep 60
+  # 延时60秒（关键：开机后等待1分钟）
+ExecStart=/home/orangepi/demo01/4g_time_sync.sh
+  # 脚本的绝对路径
+User=root
+  # 必须root权限（设置系统时间需要）
+RemainAfterExit=yes
+  # 执行完毕后仍标记为"运行中"（不影响，可选）
+
+[Install]
+WantedBy=multi-user.target
+  # 多用户模式下自启动

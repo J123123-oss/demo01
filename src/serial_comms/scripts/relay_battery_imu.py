@@ -360,7 +360,7 @@ class BatteryIMURelayNode:
             # === 发送新请求（优化优先级）===
             if self.current_state == STATE_READY:
                 # 优先处理IMU查询（最高优先级）
-                if current_time - self.last_imu_sent >= 0.02:  # 50Hz
+                if current_time - self.last_imu_sent >= 0.2:  # 5Hz
                     if self.send_imu_query():
                         self.last_imu_sent = current_time
                         self.imu_query_count += 1

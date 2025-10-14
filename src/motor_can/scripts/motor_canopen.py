@@ -933,7 +933,7 @@ class ServoDriveController:
             #         self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
 
-            angle_condition_met = (-5 < self.imu_yaw < -1.0 or 1.0 < self.imu_yaw < 5)
+            angle_condition_met = (-5 < self.imu_yaw < -1.5 or 1.5 < self.imu_yaw < 5)
         
             if angle_condition_met:
                 # 第一次检测到角度问题时记录时间
@@ -1202,8 +1202,9 @@ class ServoDriveController:
                     # rospy.logwarn(f"读取电机 {motor_id} 实际速度 {int(velocity/68/20)}rpm ")
 
                     return velocity
-        rospy.logwarn(f"读取电机 {motor_id} 实际速度超时")
-        return None
+        # rospy.logwarn(f"读取电机 {motor_id} 实际速度超时")
+        self.motor_driver = False
+        return 0
     def get_actual_torque(self, motor_id):
         """
         读取实际转矩 (6077h)
