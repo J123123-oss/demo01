@@ -45,6 +45,14 @@ class ServoDriveController:
         self.elevator_start_time = 0
         self.LOW_BATTERY_THRESHOLD = 40  # 电池低电量阈值，单位百分比
 
+        # 添加实时速度发布计数器
+        self.velocity_publish_count = 0
+        self.velocity_publish_interval = 5  # 每5次发布一次速度数据
+            # 添加上次速度值的存储变量
+        self.last_velocity_up = 0
+        self.last_velocity_low = 0
+        self.last_velocity_brush = 0
+
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态[默认状态]
@@ -352,18 +360,31 @@ class ServoDriveController:
 
     def publish_state(self):
         """发布机器人状态信息，包含速度和状态"""
-        self.current_velocity_up = self.get_actual_velocity(3)
-        self.current_velocity_low = self.get_actual_velocity(2)
-        self.current_velocity_brush = self.get_actual_velocity(4)
+        # 更新计数器
+        self.velocity_publish_count += 1
+        
+        # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
+        if self.velocity_publish_count >= self.velocity_publish_interval:
+            # 获取新的速度数据
+            self.last_velocity_up = self.get_actual_velocity(3)
+            self.last_velocity_low = self.get_actual_velocity(2)
+            self.last_velocity_brush = self.get_actual_velocity(4)
+            self.velocity_publish_count = 0  # 重置计数器
+        
+        # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
+        velocity_up = self.last_velocity_up
+        velocity_low = self.last_velocity_low
+        velocity_brush = self.last_velocity_brush
+
         state_msg = {
             "status": self.current_status,
             "battery": self.battery_remaining, # 电池百分比,
             "battery_temperatures": self.battery_temperatures, # 电池温度，共3个
             "progress": self.progress,
             "imu_yaw": self.imu_yaw,  # IMU偏航角
-            "velocity_up": self.current_velocity_up / rate,  # 单位转换为RPM
-            "velocity_low": self.current_velocity_low / rate,
-            "velocity_brush": self.current_velocity_brush / rate,
+            "velocity_up": velocity_up / rate,  # 单位转换为RPM
+            "velocity_low": velocity_low / rate,
+            "velocity_brush": velocity_brush / rate,
             "velocity_locking": 0,
             "sensors_status": self.sensors_status,  # 超声波传感器状态
             "device_status": {
@@ -479,7 +500,7 @@ class ServoDriveController:
                     # 注意：1 RPM = 68 pulses per second（因为rate = 68 Hz）
                     rpm = abs(velocity) / 68
                 
-                    rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} puu/s | 约 {rpm} rpm")
+                    # rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} puu/s | 约 {rpm} rpm")
                     return velocity  # 返回32位整数形式
         rospy.logwarn(f"读取电机 {motor_id} 当前速度失败")
         return 0
@@ -640,7 +661,7 @@ class ServoDriveController:
                         self.set_state("UNLOADING")
                         self.progress = 10
                         self.unloading_start_time = time.time()  # 记录开始时间
-                        print("unloading_start_time:",self.unloading_start_time)
+                        # print("unloading_start_time:",self.unloading_start_time)
                 elif(not msg.sensor_a and not msg.sensor_c):
                     self.set_state("BACKWARD")
                     self.progress = 20
@@ -857,7 +878,7 @@ class ServoDriveController:
             return 0
         
         # 抗积分饱和 - 大偏差时清零积分
-        if abs(error) > 2: #5
+        if abs(error) > 0.3: #5
             self.pid_integral = 0
         
         # PID计算
@@ -865,9 +886,9 @@ class ServoDriveController:
         derivative = error - self.pid_last_error
         
         # 积分限幅
-        integral_max = 50   #300
-        self.pid_integral = 0
-        # self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
+        integral_max = 30   #300
+        # self.pid_integral = 0
+        self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
         # print("pid_integral:",self.pid_integral)
         correction = (self.pid_kp * error +
                     self.pid_ki * self.pid_integral +
@@ -1098,7 +1119,7 @@ class ServoDriveController:
         elif self.current_status == "UPSTOP":
             left_speed = 0 # 上电机停
             # right_speed = int(-self.speed_pluse_max * 1)  # 下轮保持切换前速度
-            right_speed = self.current_velocity_low  # 下轮保持切换前速度
+            right_speed = self.last_right_speed  # 下轮保持切换前速度
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -1115,7 +1136,7 @@ class ServoDriveController:
             # self.current_velocity_brush = brush_speed               
         elif self.current_status == "LOWSTOP":
             # left_speed = int(self.speed_pluse_max * 1) # 上电机保持切换前速度 
-            left_speed =  self.current_velocity_up  # 上电机保持切换前速度 
+            left_speed =  self.last_left_speed  # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
             brush_speed = self.last_brush_speed
             if (self.last_left_speed != left_speed or
@@ -1234,7 +1255,7 @@ class ServoDriveController:
             msg = self.bus.recv(0.1)  # 100ms等待
             if msg and msg.arbitration_id == (0x580 + motor_id):
                 # 验证数据长度和命令字节
-                if len(msg.data) >= 6 and msg.data[0] == 0x4B:
+                if len(msg.data) >= 6 and msg.data[0] == 0x4B and msg.data[1] == 0x77 and msg.data[2] == 0x60:
                     # 解析16位转矩值 (Int16)
                     torque = msg.data[4] | (msg.data[5] << 8)
                     # 处理有符号数 (16位有符号整数)
@@ -1281,7 +1302,7 @@ class ServoDriveController:
             msg = self.bus.recv(0.1)  # 100ms等待
             if msg and msg.arbitration_id == (0x580 + motor_id):
                 # 检查是否正确返回
-                if len(msg.data) >= 6 and msg.data[0] == 0x4B:
+                if len(msg.data) >= 6 and msg.data[0] == 0x4B and msg.data[1] == 0x78 and msg.data[2] == 0x60:
                     # 16位返回值 (Int16)
                     current = msg.data[4] | (msg.data[5] << 8)
                     # 处理有符号数
@@ -1295,21 +1316,23 @@ class ServoDriveController:
         """读取电机故障码"""
         # 发送读取故障码指令
         self.send_command(motor_id, [0x40, 0x3F, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
-        if self.get_actual_velocity(motor_id) != 0:
-            self.motor_driver = True
+        # if self.get_actual_velocity(motor_id) != 0:
+            # self.motor_driver = True
         # 接收回复
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 500ms超时
             msg = self.bus.recv(0.1)  # 100ms等待
             if msg and msg.arbitration_id == (0x580 + motor_id):
+                # print("fault_code_data:",msg.data)
                 # 验证 SDO 响应类型（0x43 表示读取成功）
-                if len(msg.data) >= 6 and msg.data[1] == 0x3F and msg.data[2] == 0x60:
+                if len(msg.data) >= 6 and msg.data[1] == 0x3F and msg.data[1] == 0x3F and msg.data[2] == 0x60:
                     fault_code = msg.data[4] | (msg.data[5] << 8)
-                    print("msg.data:", msg.data)
+                    # print("msg.data:", msg.data)
                     if fault_code != 0:
                         rospy.logwarn(f"电机 {motor_id} 故障码: 0x{fault_code:04X} ({fault_code})")
                     else:
                         rospy.loginfo(f"电机 {motor_id} 无故障")
+                        self.motor_driver = True
                     return fault_code
         rospy.logwarn(f"读取电机 {motor_id} 故障码超时")
         self.motor_driver = False
@@ -1337,8 +1360,8 @@ class ServoDriveController:
 
     def check_and_clear_faults(self):
         """定期检查并清除电机故障"""
-        for motor_id in [2, 3, 4]:  # 检查所有电机
-        # for motor_id in [4]:  # 检查所有电机
+        # for motor_id in [2, 3, 4]:  # 检查所有电机
+        for motor_id in [4]:  # 检查所有电机
             # 1. 检查故障码
             fault_code = self.read_fault_code(motor_id)
             actual_velocity = self.get_actual_velocity(motor_id)

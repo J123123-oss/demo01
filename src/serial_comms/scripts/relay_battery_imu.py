@@ -28,10 +28,10 @@ class BatteryIMURelayNode:
         self.imu_buffer = bytearray()
         
         # 温度控制参数
-        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 15.0)  # 高温阈值
-        self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 10.0)    # 低温阈值
-        self.battery_check_interval = rospy.get_param('~battery_check_interval', 60.0)             # 电池检查间隔
-        self.relay_check_interval = rospy.get_param('~relay_check_interval', 180.0)             # 继电器检查间隔
+        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 10.0)  # 高温阈值
+        self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 5.0)    # 低温阈值
+        self.battery_check_interval = rospy.get_param('~battery_check_interval', 10.0)             # 电池检查间隔
+        self.relay_check_interval = rospy.get_param('~relay_check_interval', 20.0)             # 继电器检查间隔
         self.current_relay_state = False  # 当前继电器状态
         
         # 获取串口参数
@@ -486,18 +486,22 @@ class BatteryIMURelayNode:
                             else:
                                 byte_val = ord(byte)
 
-                            # 分类打印
+                            # 帧头分流逻辑
                             if byte_val == 0xDD:
-                                rospy.loginfo("检测到电池数据帧头")
+                                # rospy.loginfo(f"检测到电池数据帧头: {hex_str}")
+                                if len(self.battery_buffer) > 0:
+                                    rospy.logwarn("电池缓冲区已有数据，可能有帧丢失")
                                 self.battery_buffer.clear()
                                 self.battery_buffer.append(byte_val)
                             elif byte_val == 0x50:
-                                # rospy.loginfo("检测到IMU数据帧头")
+                                # rospy.loginfo(f"检测到IMU数据帧头: {hex_str}")
+                                if len(self.imu_buffer) > 0:
+                                    rospy.logwarn("IMU缓冲区已有数据，可能有帧丢失")
                                 self.imu_buffer.clear()
                                 self.imu_buffer.append(byte_val)
-                            elif len(self.battery_buffer) > 0 and len(self.battery_buffer) < 100:
+                            elif len(self.battery_buffer) > 0 and self.battery_buffer[0] == 0xDD and len(self.battery_buffer) < 50:
                                 self.battery_buffer.append(byte_val)
-                            elif len(self.imu_buffer) > 0 and len(self.imu_buffer) < 20:
+                            elif len(self.imu_buffer) > 0 and self.imu_buffer[0] == 0x50 and len(self.imu_buffer) < 20:
                                 self.imu_buffer.append(byte_val)
                             else:
                                 rospy.loginfo(f"收到其他类型数据: {byte_val:02X}")

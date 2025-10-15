@@ -22,22 +22,33 @@ screen -L -Logfile /tmp/4g_time.log -d -m -S 4g_time $SERIAL_DEV $BAUD_RATE \
 # 提取最新响应
 RAW_RESPONSE=$(grep "+QLTS:" /tmp/4g_time.log | tail -1)
 
-# 核心修改：彻底替换所有"/"为"-"，并替换","为空格
-# 步骤1：提取引号内内容 → 2025/10/13,20:56:31+32,0
-# 步骤2：移除时区及后缀 → 2025/10/13,20:56:31
-# 步骤3：将所有"/"替换为"-"，","替换为空格 → 2025-10-13 20:56:31
-TIME_STR=$(echo "$RAW_RESPONSE" | awk -F'"' '{print $2}' | cut -d'+' -f1 | sed 's/\//-/g; s/,/ /')
+echo "原始响应: $RAW_RESPONSE"
 
-# 验证时间格式
-if ! date -d "$TIME_STR" > /dev/null 2>&1; then
-    echo "错误：获取的时间格式无效！原始响应：$RAW_RESPONSE"
-    echo "解析后的时间：$TIME_STR"
-    exit 1
-fi
+# 提取时间数据
+TIME_DATA=$(echo "$RAW_RESPONSE" | grep -o '"[^"]*"')
+TIME_DATA=${TIME_DATA//\"/}
 
-# 校准系统时间
-echo "正在校准系统时间：$TIME_STR"
-sudo date -s "$TIME_STR"
+echo "提取的时间数据: $TIME_DATA"
+
+# 解析时间数据
+IFS=',' read -r DATE TIME_PART DST <<< "$TIME_DATA"
+IFS='+' read -r TIME TIMEZONE <<< "$TIME_PART"
+
+echo "解析结果:"
+echo "日期: $DATE"
+echo "时间: $TIME" 
+echo "时区: $TIMEZONE"
+echo "夏令时标志: $DST"
+
+# 组合标准时间格式
+FORMATTED_TIME="${DATE//\//-} $TIME"
+
+echo "格式化时间: $FORMATTED_TIME"
+
+sudo date +"%Y%m%d %H:%M:%S" -s "$FORMATTED_TIME"
 sudo hwclock -w
 
-echo "时间校准完成！当前系统时间：$(date)"
+echo "时间校准完成！"
+echo "当前系统时间: $(date)"
+echo "当前UTC时间: $(date -u)"
+echo "当前硬件时间: $(sudo hwclock -r)"
