@@ -10,6 +10,7 @@ from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
 from serial_comms.msg import BatteryStatus  # 确保导入正确的消息类型
+from std_srvs.srv import Trigger
 import threading
 import sys
 import select
@@ -584,6 +585,10 @@ class ServoDriveController:
             time.sleep(0.3)  # 等待故障清除
 
         rospy.loginfo(f"配置电机 {motor_id}: 速度={int(velocity/rate)}, 加速度={acceleration}, 减速度={deceleration}")
+        
+        #同步开启IMU
+        self.start_imu()
+
         self.start_motor(motor_id)
         self.set_velocity_mode(motor_id)
         self.set_target_velocity(motor_id, velocity)  #输出转换为脉冲/秒
@@ -685,6 +690,8 @@ class ServoDriveController:
                             self.set_state("STOP")
                             self.progress = 0
                             self.unloading_start_time = None  # 重置
+                            #停止IMU
+                            self.stop_imu()
 
         #自动模式第一步 >> START
         if self.auto_mode and self.current_status == "START": 
@@ -746,6 +753,8 @@ class ServoDriveController:
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
                     rospy.loginfo("——————————————————————进仓完成——————————————————————")
+                    # 完成任务后关闭IMU
+                    self.stop_imu()
                     rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
                     for i in range(50):
                         rospy.logerr("DUMMY MESSAGE %d/5: Flushing buffer before exit." % (i+1))
@@ -1585,7 +1594,17 @@ class ServoDriveController:
 
         rospy.logwarn(f"设置电机 {motor_id} {param_name} 超时，可能未生效")
         return False
+    def start_imu():
+        rospy.wait_for_service('/imu_parser_node/start_imu')
+        start_srv = rospy.ServiceProxy('/imu_parser_node/start_imu', Trigger)
+        resp = start_srv()
+        print(resp.message)
 
+    def stop_imu():
+        rospy.wait_for_service('/imu_parser_node/stop_imu')
+        stop_srv = rospy.ServiceProxy('/imu_parser_node/stop_imu', Trigger)
+        resp = stop_srv()
+        print(resp.message)
     @staticmethod
     def keyboard_listener(controller):
         rospy.loginfo("按键控制：s=停止, f=前进, b=后退")

@@ -7,26 +7,23 @@ import time
 import datetime
 import numpy as np
 from std_msgs.msg import Float32, Header, Bool, String
-from serial_comms.msg import BatteryStatus, INSPVAE
+from serial_comms.msg import BatteryStatus
 from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
 import threading
 
 # 状态常量
 STATE_READY = 0
 STATE_WAITING_BATTERY = 1
-STATE_WAITING_IMU = 2
 STATE_WAITING_RELAY = 3
 
-class BatteryIMURelayNode:
+class BatteryRelayNode:
     def __init__(self):
-        rospy.init_node('battery_imu_relay_node')
+        rospy.init_node('battery_imu_node')
         
         # 时间阈值管理
         self.last_battery_sent = 0
-        self.last_imu_sent = 0
         self.last_relay_check = 0
         self.battery_buffer = bytearray()
-        self.imu_buffer = bytearray()
         
         # 温度控制参数
         self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 8.0)  # 高温阈值
@@ -61,7 +58,6 @@ class BatteryIMURelayNode:
         self.current_state = STATE_READY
         self.loop_counter = 0
         self.battery_timeout = 0
-        self.imu_timeout = 0
         self.relay_timeout = 0
         self.battery_retry_count = 0
         self.max_battery_retry = 3  # 增加重试次数
@@ -69,14 +65,8 @@ class BatteryIMURelayNode:
         # 电池03指令请求帧
         self.REQUEST_BASIC_FRAME = bytes.fromhex('DD A5 03 00 FF FD 77')
         
-        # IMU查询指令
-        self.device_addr = 0x50
-        self.rx_frame_length = 7
-        self.REQ_IMU_FRAME = self.create_imu_query_frame()
-        
         # 创建发布器
         self.battery_pub = rospy.Publisher('/battery_status', BatteryStatus, queue_size=10)
-        self.imu_pub = rospy.Publisher('/inspvae_data', INSPVAE, queue_size=1)
         self.relay_status_pub = rospy.Publisher('/relay_status', Bool, queue_size=10)
         self.temperature_pub = rospy.Publisher('/control_temperature', Float32, queue_size=10)
         
@@ -93,10 +83,8 @@ class BatteryIMURelayNode:
         # 添加统计信息
         self.battery_query_count = 0
         self.battery_success_count = 0
-        self.imu_query_count = 0
-        self.imu_success_count = 0
         
-        rospy.loginfo("电池-IMU-继电器集成节点初始化完成")
+        rospy.loginfo("电池-继电器集成节点初始化完成")
 
     def init_serial(self, port, baudrate):
         """串口初始化"""
@@ -114,25 +102,6 @@ class BatteryIMURelayNode:
         except Exception as e:
             rospy.logerr(f"串口连接失败: {e}")
             return False
-
-    def create_imu_query_frame(self):
-        """生成IMU查询帧"""
-        cmd = bytes([self.device_addr, 0x03, 0x00, 0x3F, 0x00, 0x01])
-        crc = self.calculate_crc(cmd)
-        return cmd + crc
-
-    def calculate_crc(self, data):
-        """Modbus CRC16校验计算"""
-        crc = 0xFFFF
-        for byte in data:
-            crc ^= byte
-            for _ in range(8):
-                if crc & 0x0001:
-                    crc >>= 1
-                    crc ^= 0xA001
-                else:
-                    crc >>= 1
-        return struct.pack('<H', crc)
 
     def parse_date(self, raw_date):
         """解析电池生产日期"""
@@ -199,21 +168,6 @@ class BatteryIMURelayNode:
             rospy.logerr(f"电池数据解析错误: {e}")
             return False
 
-    def parse_imu_response(self, frame):
-        """解析IMU响应数据"""
-        try:
-            recv_crc = frame[-2:]
-            calc_crc = self.calculate_crc(frame[:-2])
-            if recv_crc != calc_crc:
-                rospy.logwarn("IMU数据CRC校验失败")
-                return None
-            
-            yaw_bytes = frame[3:5]
-            yaw = np.int16(struct.unpack('>h', yaw_bytes)[0]) / 32768.0 * 180.0
-            return {'yaw': yaw}
-        except Exception as e:
-            rospy.logerr(f"IMU数据解析错误: {e}")
-            return None
     def send_relay_command(self, command_data):
         """发送继电器命令"""
         try:
@@ -308,8 +262,8 @@ class BatteryIMURelayNode:
         
         rospy.loginfo(f"温度监测 - 最高: {max_temp}°C, 平均: {avg_temp}°C, 当前继电器状态: {'开启' if self.current_relay_state else '关闭'}")
         
-        if max_temp >= self.temperature_threshold_high and self.current_relay_state:
-            rospy.loginfo(f"温度 {max_temp}°C 超过阈值 {self.temperature_threshold_high}°C，关闭继电器")
+        if avg_temp >= self.temperature_threshold_high and self.current_relay_state:
+            rospy.loginfo(f"温度 {avg_temp}°C 超过阈值 {self.temperature_threshold_high}°C，关闭继电器")
             if self.enable_relay(False) and  self.current_relay_state:
                 rospy.loginfo("继电器已关闭")
             else:
@@ -356,18 +310,7 @@ class BatteryIMURelayNode:
                         # self.battery_retry_count = 0
                         # rospy.logwarn("电池查询重试次数用尽，返回就绪状态")
             
-            # 2. 处理IMU响应（独立于电池状态）
-            if self.current_state == STATE_WAITING_IMU:
-                if self.process_imu_buffer():
-                    self.current_state = STATE_READY
-                    self.imu_success_count += 1
-                elif current_time >= self.imu_timeout:
-                    # IMU超时不阻塞，直接清除状态
-                    self.imu_buffer.clear()
-                    self.current_state = STATE_READY
-                    rospy.loginfo("IMU响应超时")
-            
-            # 3. 处理继电器响应
+            # 2. 处理继电器响应
             if self.current_state == STATE_WAITING_RELAY:
                 # 继电器响应通常是即时的，短暂等待后返回就绪
                 if current_time >= self.relay_timeout:
@@ -376,18 +319,8 @@ class BatteryIMURelayNode:
             
             # === 发送新请求（优化优先级）===
             if self.current_state == STATE_READY:
-                # 优先处理IMU查询（最高优先级）
-                if current_time - self.last_imu_sent >= 0.2:  # 5Hz
-                    if self.send_imu_query():
-                        self.last_imu_sent = current_time
-                        self.imu_query_count += 1
-                        self.current_state = STATE_WAITING_IMU
-                        self.imu_timeout = current_time + 0.1  # 100ms超时
-                    else:
-                        rospy.logerr("IMU查询发送失败")
-                
                 # 其次处理电池查询（低优先级）
-                elif current_time - self.last_battery_sent >= self.battery_check_interval:
+                if current_time - self.last_battery_sent >= self.battery_check_interval:
                     if self.send_battery_query():
                         self.last_battery_sent = current_time
                         self.battery_query_count += 1
@@ -405,10 +338,6 @@ class BatteryIMURelayNode:
                     if self.battery_query_count > 0:
                         battery_success_rate = (self.battery_success_count / self.battery_query_count) * 100
                         rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
-                    
-                    if self.imu_query_count > 0:
-                        imu_success_rate = (self.imu_success_count / self.imu_query_count) * 100
-                        rospy.loginfo(f"IMU查询成功率: {imu_success_rate:.2f}% ({self.imu_success_count}/{self.imu_query_count})")
             
             self.rate.sleep()
 
@@ -430,23 +359,6 @@ class BatteryIMURelayNode:
                 return False  # 重新初始化后下次再试
         except Exception as e:
             rospy.logerr(f"电池查询发送失败: {e}")
-        return False
-
-    def send_imu_query(self):
-        """发送IMU查询指令"""
-        try:
-            if self.ser and self.ser.is_open:
-                # 使用锁保护串口访问
-                with self.serial_lock:
-                    self.ser.write(self.REQ_IMU_FRAME)
-                return True
-        except serial.SerialException as e:
-            rospy.logerr(f"IMU查询发送失败（串口异常）: {e}")
-            # 尝试重新初始化串口
-            if self.reinit_serial():
-                return False  # 重新初始化后下次再试
-        except Exception as e:
-            rospy.logerr(f"IMU查询发送失败: {e}")
         return False
 
     def reinit_serial(self):
@@ -499,23 +411,15 @@ class BatteryIMURelayNode:
                             else:
                                 byte_val = ord(byte)
 
-                            # 帧头分流逻辑
+                            # 只保留电池分流逻辑
                             if byte_val == 0xDD:
                                 # rospy.loginfo(f"检测到电池数据帧头: {hex_str}")
                                 if len(self.battery_buffer) > 0:
                                     rospy.logwarn("电池缓冲区已有数据，可能有帧丢失")
                                 self.battery_buffer.clear()
                                 self.battery_buffer.append(byte_val)
-                            elif byte_val == 0x50:
-                                # rospy.loginfo(f"检测到IMU数据帧头: {hex_str}")
-                                if len(self.imu_buffer) > 0:
-                                    rospy.logwarn("IMU缓冲区已有数据，可能有帧丢失")
-                                self.imu_buffer.clear()
-                                self.imu_buffer.append(byte_val)
                             elif len(self.battery_buffer) > 0 and self.battery_buffer[0] == 0xDD and len(self.battery_buffer) < 50:
                                 self.battery_buffer.append(byte_val)
-                            elif len(self.imu_buffer) > 0 and self.imu_buffer[0] == 0x50 and len(self.imu_buffer) < 20:
-                                self.imu_buffer.append(byte_val)
                             else:
                                 rospy.loginfo(f"收到其他类型数据: {byte_val:02X}")
                         
@@ -573,33 +477,6 @@ class BatteryIMURelayNode:
         
         return False
 
-    def process_imu_buffer(self):
-        """处理IMU响应数据"""
-        start_idx = 0
-        while start_idx < len(self.imu_buffer):
-            if self.imu_buffer[start_idx] != 0x50:
-                start_idx += 1
-                continue
-                
-            if len(self.imu_buffer) < start_idx + self.rx_frame_length:
-                return False
-                
-            frame_end = start_idx + self.rx_frame_length
-            frame = bytes(self.imu_buffer[start_idx:frame_end])
-            
-            result = self.parse_imu_response(frame)
-            if result:
-                msg = INSPVAE()
-                msg.header = Header(stamp=rospy.Time.now(), frame_id='inspvae')
-                msg.yaw = result['yaw'] % 360
-                self.imu_pub.publish(msg)
-                self.imu_buffer.clear()  # 清空整个缓冲区
-                return True
-            
-            start_idx += 1
-            
-        return False
-
     def enable_relay_callback(self, req):
         """ROS服务回调: 开启/关闭继电器"""
         success = self.enable_relay(req.data)
@@ -625,7 +502,7 @@ class BatteryIMURelayNode:
 
 if __name__ == '__main__':
     try:
-        node = BatteryIMURelayNode()
+        node = BatteryRelayNode()
         node.run()
     except rospy.ROSInterruptException:
         pass
