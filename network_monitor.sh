@@ -24,7 +24,7 @@ while true; do
             if [ "$CURRENT_NETWORK" != "wifi" ]; then
                 echo "WiFi网络可用，切换到WiFi"
                 sudo ip route del default 2>/dev/null
-                sudo ip route add default via 192.168.1.1 dev wlan0
+                sudo ip route add default via 192.168.200.1 dev wlan0
                 CURRENT_NETWORK="wifi"
             fi
         else

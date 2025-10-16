@@ -574,6 +574,8 @@ class ServoDriveController:
     def configure_motor(self, motor_id, velocity, acceleration, deceleration):
         # 检查电机故障
         fault_code = self.read_fault_code(motor_id)
+        # saving_mode = self.read_energy_saving_mode(motor_id)
+        # set_torque_zero_param = self.set_torque_zero_param(motor_id,"Fn_04c",100)
         # max_torque = self.get_max_torque(motor_id)
         # actual_torque = self.get_actual_torque(motor_id)
         if fault_code and fault_code != 0:
@@ -1423,10 +1425,10 @@ class ServoDriveController:
             # 2. 非故障情况监控
             # 读取当前转矩
             actual_torque = self.get_actual_torque(motor_id)
-            if self.get_actual_velocity(motor_id) == 0:
-                self.motor_driver = False
-            else:
-                self.motor_driver = True
+            # if self.get_actual_velocity(motor_id) == 0:
+            #     self.motor_driver = False
+            # else:
+            #     self.motor_driver = True
             # 获取配置的最大转矩
             max_torque = self.get_max_torque(motor_id)
             if max_torque is not None and actual_torque is not None:
@@ -1436,8 +1438,154 @@ class ServoDriveController:
                 utilization = abs(actual_torque) / max_torque * 100
                 if utilization > 80:
                     rospy.logwarn(f"电机 {motor_id} 转矩利用率过高: {utilization:.1f}%")
+    def read_energy_saving_mode(self, motor_id):
+        """读取省电功能总开关 Fn_1d0 的参数值（总线零速度指令模式下的自动省电功能模式）"""
+        # 发送读取 Fn_1d0 指令：CANopen SDO 读取命令，索引 0x2200（Fn_1d0），子索引 0x00
+        # 命令格式：[0x40（读取命令字）, 0x00（索引低字节）, 0x22（索引高字节）, 0x00（子索引）, 0x00, 0x00, 0x00, 0x00]
+        self.send_command(motor_id, [0x40, 0xD0, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00])
+        rospy.loginfo(f"已向电机 {motor_id} 发送读取 Fn_1d0 指令")
 
-        
+        # 接收回复，超时时间 0.5 秒（与故障码读取保持一致）
+        start_time = time.time()
+        while time.time() - start_time < 0.5:
+            msg = self.bus.recv(0.1)  # 每次等待 100ms
+            if msg and msg.arbitration_id == (0x580 + motor_id):  # 验证电机回复的仲裁 ID
+                print("Fn_1d0 读取响应数据:", msg.data)
+                # 验证响应格式：数据长度≥6，且索引匹配（0x2200，小端模式为 0x00 0x22）
+                if len(msg.data) >= 6 and msg.data[1] == 0xD0 and msg.data[2] == 0x21:
+                    # 解析 Fn_1d0 值（16 位无符号整数，低字节 data[4]，高字节 data[5]）
+                    fn_1d0_value = msg.data[4] | (msg.data[5] << 8)
+                    rospy.loginfo(f"电机 {motor_id} Fn_1d0（省电功能模式）当前值: {fn_1d0_value}")
+                    # Fn_1d0 取值含义：0=关闭，1=总线指令触发，2=超时触发，3=指令或超时触发
+                    mode_desc = {0: "关闭自动省电功能", 1: "总线指令触发省电", 2: "停机超时触发省电", 3: "指令或超时触发省电"}
+                    rospy.loginfo(f"Fn_1d0 模式说明: {mode_desc.get(fn_1d0_value, '未知模式')}")
+                    return fn_1d0_value  # 返回读取到的 Fn_1d0 值
+
+        # 超时处理
+        rospy.logwarn(f"读取电机 {motor_id} Fn_1d0 超时")
+        return None  # 超时返回 None
+    def set_energy_saving_mode(self, motor_id, target_value=3):
+        """修改省电功能总开关 Fn_1d0 为目标值（默认 3：指令或超时触发，假设对应索引 0x2200.00）"""
+        # 校验目标值合法性：Fn_1d0 仅支持 0-3（文档规定模式）
+        if target_value not in [0, 1, 2, 3]:
+            rospy.logerror(f"Fn_1d0 目标值 {target_value} 非法！仅支持 0（关闭）、1（指令触发）、2（超时触发）、3（指令或超时触发）")
+            return False
+
+        # 发送修改 Fn_1d0 指令：CANopen SDO 写入命令，索引 0x2200.00，目标值 target_value
+        # 命令格式：[0x23（写入命令字）, 0x00（索引低字节）, 0x22（索引高字节）, 0x00（子索引）, 
+        #           target_value低字节, target_value高字节, 0x00, 0x00]（16位无符号整数）
+        low_byte = target_value & 0xFF  # 目标值低字节
+        high_byte = (target_value >> 8) & 0xFF  # 目标值高字节
+        self.send_command(motor_id, [0x2B, 0xD0, 0x21, 0x00, low_byte, high_byte, 0x00, 0x00])
+        rospy.loginfo(f"已向电机 {motor_id} 发送设置 Fn_1d0 指令，目标值: {target_value}")
+
+        # 接收写入确认，超时时间 0.5 秒
+        start_time = time.time()
+        while time.time() - start_time < 0.5:
+            msg = self.bus.recv(0.1)
+            if msg and msg.arbitration_id == (0x580 + motor_id):  # 验证回复 ID
+                print("Fn_1d0 设置响应数据:", msg.data)
+                # 验证响应：索引匹配（0x2200），且命令字为 0x60（SDO 写入确认，部分电机用 0x43，需根据实际调整）
+                if len(msg.data) >= 4 and msg.data[1] == 0xD0 and msg.data[2] == 0x21:
+                    # 确认写入成功（部分电机响应中会带回写入值，可额外校验）
+                    rospy.loginfo(f"电机 {motor_id} Fn_1d0 已成功设置为 {target_value}（指令或超时触发省电）")
+                    return True  # 设置成功返回 True
+
+        # 超时处理
+        rospy.logwarn(f"设置电机 {motor_id} Fn_1d0 超时，可能未生效")
+        return False  # 超时返回 False
+    
+    def read_torque_zero_params(self, motor_id):
+        """读取零转矩判定参数：Fn_04b（零转矩到达门限）和 Fn_04c（零转矩到达回差值）"""
+        # 定义参数与CANopen索引的映射（需根据电机手册确认真实索引）
+        param_map = {
+            "Fn_04b": {"index": 0x204B, "desc": "零转矩到达门限（额定转矩千分之一）"},
+            "Fn_04c": {"index": 0x204C, "desc": "零转矩到达回差值（额定转矩千分之一）"}
+        }
+        result = {}
+
+        for param_name, info in param_map.items():
+            index = info["index"]
+            # 构造SDO读取命令：[0x40(读取命令字), 索引低字节, 索引高字节, 0x00(子索引), 0x00*4]
+            cmd_low_byte = index & 0xFF
+            cmd_high_byte = (index >> 8) & 0xFF
+            self.send_command(motor_id, [0x40, cmd_low_byte, cmd_high_byte, 0x00, 0x00, 0x00, 0x00, 0x00])
+            rospy.loginfo(f"已向电机 {motor_id} 发送读取 {param_name}（索引0x{index:04X}）指令")
+
+            # 接收该参数的回复
+            start_time = time.time()
+            param_value = None
+            while time.time() - start_time < 0.5:  # 单参数读取超时0.5秒
+                msg = self.bus.recv(0.1)
+                if msg and msg.arbitration_id == (0x580 + motor_id):  # 验证电机回复ID
+                    print(f"{param_name} 读取响应数据:", msg.data)
+                    # 验证响应格式：数据长度≥6，且索引匹配（低字节msg.data[1]，高字节msg.data[2]）
+                    if len(msg.data) >= 6 and msg.data[1] == cmd_low_byte and msg.data[2] == cmd_high_byte:
+                        # 解析16位无符号参数值（低字节data[4]，高字节data[5]）
+                        param_value = msg.data[4] | (msg.data[5] << 8)
+                        rospy.loginfo(f"电机 {motor_id} {param_name}（{info['desc']}）: {param_value}")
+                        break
+            
+            if param_value is not None:
+                result[param_name] = param_value
+            else:
+                rospy.logwarn(f"读取电机 {motor_id} {param_name} 超时")
+                result[param_name] = None
+
+        # 额外输出判定区间分析（基于文档中“配合形成区间”的要求）
+        if result["Fn_04b"] is not None and result["Fn_04c"] is not None:
+            lower_limit = result["Fn_04b"]
+            upper_limit = result["Fn_04b"] + result["Fn_04c"]
+            if result["Fn_04c"] == 0:
+                rospy.logwarn(f"电机 {motor_id} Fn_04c 为0，零转矩判定区间异常（仅[{lower_limit}, {upper_limit}]），易误判未满足条件")
+            else:
+                rospy.loginfo(f"电机 {motor_id} 零转矩判定区间: [{lower_limit}, {upper_limit}]（额定转矩千分之一）")
+        return result
+    
+    def set_torque_zero_param(self, motor_id, param_name, target_value):
+        """修改零转矩判定参数：支持 Fn_04b（零转矩到达门限）或 Fn_04c（零转矩到达回差值）"""
+        # 定义参数与CANopen索引的映射（需根据电机手册确认真实索引）
+        param_config = {
+            "Fn_04b": {"index": 0x204B, "desc": "零转矩到达门限", "min": 0, "max": 1000},  # 假设范围0-1000（额定转矩千分之一）
+            "Fn_04c": {"index": 0x20C, "desc": "零转矩到达回差值", "min": 0, "max": 500}   # 假设范围0-500（额定转矩千分之一）
+        }
+
+        # 校验参数名合法性
+        if param_name not in param_config:
+            rospy.logerror(f"不支持的参数名 {param_name}！仅支持 {list(param_config.keys())}")
+            return False
+        info = param_config[param_name]
+
+        # 校验目标值范围（基于文档“合理判定区间”要求，Fn_04c建议非0）
+        if not (info["min"] <= target_value <= info["max"]):
+            rospy.logerror(f"{param_name}（{info['desc']}）目标值 {target_value} 非法！需在 [{info['min']}, {info['max']}] 范围内")
+            return False
+        if param_name == "Fn_04c" and target_value == 0:
+            rospy.logwarn(f"警告：{param_name} 设为0会导致零转矩判定异常，建议设为与Fn_04b一致的值（如100）")
+
+        # 构造SDO写入命令：[0x23(写入命令字), 索引低字节, 索引高字节, 0x00(子索引), 目标值低字节, 目标值高字节, 0x00, 0x00]
+        index = info["index"]
+        cmd_low_byte = index & 0xFF
+        cmd_high_byte = (index >> 8) & 0xFF
+        target_low = target_value & 0xFF
+        target_high = (target_value >> 8) & 0xFF
+        self.send_command(motor_id, [0x2B, cmd_low_byte, cmd_high_byte, 0x00, target_low, target_high, 0x00, 0x00])
+        rospy.loginfo(f"已向电机 {motor_id} 发送设置 {param_name} 指令，目标值: {target_value}（{info['desc']}）")
+
+        # 接收写入确认
+        start_time = time.time()
+        while time.time() - start_time < 0.5:
+            msg = self.bus.recv(0.1)
+            if msg and msg.arbitration_id == (0x580 + motor_id):
+                print(f"{param_name} 设置响应数据:", msg.data)
+                # 验证响应索引匹配
+                if len(msg.data) >= 4 and msg.data[1] == cmd_low_byte and msg.data[2] == cmd_high_byte:
+                    rospy.loginfo(f"电机 {motor_id} {param_name} 已成功设置为 {target_value}")
+                    return True
+
+        rospy.logwarn(f"设置电机 {motor_id} {param_name} 超时，可能未生效")
+        return False
+
     @staticmethod
     def keyboard_listener(controller):
         rospy.loginfo("按键控制：s=停止, f=前进, b=后退")

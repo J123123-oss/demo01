@@ -4,6 +4,7 @@ import rospy
 import serial
 import struct
 import time
+import datetime
 import numpy as np
 from std_msgs.msg import Float32, Header, Bool, String
 from serial_comms.msg import BatteryStatus, INSPVAE
@@ -213,7 +214,6 @@ class BatteryIMURelayNode:
         except Exception as e:
             rospy.logerr(f"IMU数据解析错误: {e}")
             return None
-
     def send_relay_command(self, command_data):
         """发送继电器命令"""
         try:
@@ -236,9 +236,15 @@ class BatteryIMURelayNode:
         except Exception as e:
             rospy.logerr(f"继电器通信错误: {e}")
             return False
-
     def enable_relay(self, enable=True):
-        """开启或关闭继电器"""
+        """开启或关闭继电器（仅限白天8:00-17:00可开启）"""
+        # 时间限制：只有8:00-17:00允许开启
+        if enable:
+            now = datetime.datetime.now()
+            if not (8 <= now.hour < 17):
+                rospy.logwarn("当前时间不在允许开启继电器的时段（8:00-17:00），请求被拒绝")
+                return False
+
         max_retries = 3
         for attempt in range(max_retries):
             if enable:
@@ -253,7 +259,7 @@ class BatteryIMURelayNode:
                 self.current_relay_state = enable
                 # 发布继电器状态
                 status_msg = Bool()
-                status_msg.data = self.current_relay_state
+                status_msg.data = bool(self.current_relay_state) if self.current_relay_state is not None else False
                 self.relay_status_pub.publish(status_msg)
                 return True
             else:
@@ -317,7 +323,7 @@ class BatteryIMURelayNode:
                 rospy.logwarn("继电器开启失败")
         # 发布继电器状态
         status_msg = Bool()
-        status_msg.data = self.current_relay_state
+        status_msg.data = bool(self.current_relay_state) if self.current_relay_state is not None else False
         self.relay_status_pub.publish(status_msg)
     def run(self):
         """改进的主状态机循环 - 非阻塞版本"""
