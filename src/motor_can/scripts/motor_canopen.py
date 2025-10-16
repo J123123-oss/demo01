@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 import can
 import time
-import yaml
 import rospy
 import json
+import yaml
 from std_msgs.msg import String, Int8, Float32, Float32MultiArray,Bool
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
@@ -20,7 +20,9 @@ rate = 68  # Hz   166.66>> 68.26
 class ServoDriveController:
     # def __init__(self, channel='vcan0', interface='socketcan'):
     def __init__(self, channel='can0', interface='socketcan'):
-        self.bus = can.interface.Bus(channel=channel, interface=interface)
+        self.channel = channel
+        self.interface = interface
+        self.bus = self.create_can_bus()
         self.last_left_speed = 0
         self.last_right_speed = 0
         self.last_brush_speed = 0
@@ -453,12 +455,38 @@ class ServoDriveController:
         self.relay_status = msg.data
 
 
+    def create_can_bus(self):
+        """创建CAN总线连接，失败时重试"""
+        while True:
+            try:
+                return can.interface.Bus(channel=self.channel, interface=self.interface)
+            except (can.CanError, OSError) as e:
+                rospy.logerr(f"CAN连接失败: {e}，3秒后重试...")
+                time.sleep(3)
+
+    def reconnect_can_bus(self):
+        """重连CAN总线"""
+        rospy.logwarn("尝试重连CAN总线...")
+        try:
+            if self.bus is not None:
+                self.bus.shutdown()
+        except Exception:
+            pass
+        self.bus = self.create_can_bus()
+
     def send_command(self, motor_id, command_data):
         frame_id = 0x600 + motor_id
         msg = can.Message(arbitration_id=frame_id, data=command_data, is_extended_id=False)
-        self.bus.send(msg)
-        time.sleep(0.05)
-    
+        for attempt in range(3):
+            try:
+                self.bus.send(msg)
+                time.sleep(0.05)
+                return
+            except (can.CanError, OSError) as e:
+                rospy.logerr(f"CAN通信错误: {e}，尝试重连...")
+                self.reconnect_can_bus()
+        rospy.logerr("CAN发送失败，已重试3次")
+
     def set_velocity_mode(self, motor_id):
         self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x03, 0x00, 0x00, 0x00])
         
@@ -485,7 +513,12 @@ class ServoDriveController:
         # 等待接收响应
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 超时500ms
-            msg = self.bus.recv(timeout=0.1)  # 等待最多0.1秒
+            try:
+                msg = self.bus.recv(timeout=0.1)
+            except (can.CanError, OSError) as e:
+                rospy.logerr(f"CAN接收错误: {e}，尝试重连...")
+                self.reconnect_can_bus()
+                continue
             if msg and msg.arbitration_id == (0x580 + motor_id):
                 # 检查是否为有效的606Ch响应
                 if len(msg.data) >= 8 and msg.data[0] == 0x43 and msg.data[1] == 0x6C and msg.data[2] == 0x60:

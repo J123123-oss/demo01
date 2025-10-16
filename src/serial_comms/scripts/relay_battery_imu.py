@@ -28,11 +28,11 @@ class BatteryIMURelayNode:
         self.imu_buffer = bytearray()
         
         # 温度控制参数
-        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 10.0)  # 高温阈值
+        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 8.0)  # 高温阈值
         self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 5.0)    # 低温阈值
         self.battery_check_interval = rospy.get_param('~battery_check_interval', 10.0)             # 电池检查间隔
         self.relay_check_interval = rospy.get_param('~relay_check_interval', 20.0)             # 继电器检查间隔
-        self.current_relay_state = False  # 当前继电器状态
+        # self.current_relay_state = False  # 当前继电器状态
         
         # 获取串口参数
         port = rospy.get_param('~serial_port', '/dev/IMU')
@@ -48,7 +48,14 @@ class BatteryIMURelayNode:
         if not self.ser:
             rospy.signal_shutdown("串口初始化失败")
             return
-            
+        # 初始化继电器状态为实际状态
+        relay_status = self.read_relay_status()
+        if relay_status is not None:
+            self.current_relay_state = relay_status
+            rospy.loginfo(f"继电器初始状态: {'开启' if relay_status else '关闭'}")
+        else:
+            self.current_relay_state = None
+            rospy.logwarn("无法读取继电器状态")
         # 初始化状态机
         self.current_state = STATE_READY
         self.loop_counter = 0
@@ -297,7 +304,7 @@ class BatteryIMURelayNode:
         
         if max_temp >= self.temperature_threshold_high and self.current_relay_state:
             rospy.loginfo(f"温度 {max_temp}°C 超过阈值 {self.temperature_threshold_high}°C，关闭继电器")
-            if self.enable_relay(False):
+            if self.enable_relay(False) and  self.current_relay_state:
                 rospy.loginfo("继电器已关闭")
             else:
                 rospy.logwarn("继电器关闭失败")

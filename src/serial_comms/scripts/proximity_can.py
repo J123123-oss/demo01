@@ -68,6 +68,16 @@ class DigitalInputReader:
             rospy.logerr(f"CAN interface error: {str(e)}")
             rospy.signal_shutdown("CAN initialization failed")
 
+    def reconnect_can_bus(self):
+        """重连CAN总线"""
+        rospy.logwarn("尝试重连CAN总线...")
+        try:
+            if self.bus is not None:
+                self.bus.shutdown()
+        except Exception:
+            pass
+        self._init_can()
+
     def _set_can_baudrate(self):
         """Set device baudrate to 1Mbps according to the manual"""
         try:
@@ -97,15 +107,22 @@ class DigitalInputReader:
             
             rospy.loginfo("Baudrate setting command sent. Device requires power cycle to take effect.")
             
+        except (can.CanError, OSError) as e:
+            rospy.logerr(f"CAN通信错误: {str(e)}，尝试重连...")
+            self.reconnect_can_bus()
         except Exception as e:
             rospy.logerr(f"Failed to set baudrate: {str(e)}")
-            # 继续运行，但可能使用原波特率
 
     def _wait_for_baudrate_confirmation(self, timeout=0.5):
         """Wait for device response after baudrate setting"""
         start_time = time.time()
         while time.time() - start_time < timeout:
-            response = self.bus.recv(timeout - (time.time() - start_time))
+            try:
+                response = self.bus.recv(timeout - (time.time() - start_time))
+            except (can.CanError, OSError) as e:
+                rospy.logerr(f"CAN通信错误: {str(e)}，尝试重连...")
+                self.reconnect_can_bus()
+                continue
             if response:
                 rospy.logdebug(f"Received baudrate response: ID={hex(response.arbitration_id)}, Data={response.data}")
                 # 检查响应格式 (功能码0x04 + 设备地址 + 状态)
@@ -133,12 +150,9 @@ class DigitalInputReader:
             return
             
         try:
-            # 发送查询请求
             query_frame = self._create_query_frame()
             self.bus.send(query_frame)
             rospy.logdebug(f"Sent query frame: ID=0x{query_frame.arbitration_id:03x}")
-            
-            # 等待响应(增加超时时间)
             response = self.bus.recv(timeout=0.8)
             
             if not response:
@@ -162,8 +176,9 @@ class DigitalInputReader:
             input_byte = response.data[0]  # 第一字节包含1-8通道状态
             self._process_input_data(input_byte)
            
-        except can.CanError as e:
-            rospy.logerr(f"CAN communication error: {str(e)}")
+        except (can.CanError, OSError) as e:
+            rospy.logerr(f"CAN通信错误: {str(e)}，尝试重连...")
+            self.reconnect_can_bus()
         except Exception as e:
             rospy.logerr(f"Unexpected error: {str(e)}")
 
