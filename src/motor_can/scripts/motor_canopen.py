@@ -936,7 +936,8 @@ class ServoDriveController:
         # 实时根据当前状态和IMU矫正上下轮速度
         # 1. START状态：速度模式初始化电机
         if self.enable_drive_flag and (self.current_status =="START" or self.current_status =="CHARGE_OUT" or self.current_status =="RETURN_DOCK"):  # START, CHARGE_OUT, RETURN_DOCK
-            if self.battery_remaining is not None and self.battery_remaining < self.LOW_BATTERY_THRESHOLD and self.current_status =="START":
+            if self.battery_remaining is not None and self.battery_remaining < self.LOW_BATTERY_THRESHOLD \
+                and (self.current_status =="START" or self.current_status =="STOP"):
                 rospy.logerr("电池电量过低，无法启动电机！请充电后重试!")
                 self.enable_drive_flag = False
                 self.main_board = False # 主控板报警表示电量低于阈值无法启动
