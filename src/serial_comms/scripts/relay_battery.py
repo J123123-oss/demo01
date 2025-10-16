@@ -133,54 +133,87 @@ class BatteryRelayNode:
         """解析电池响应数据帧并存储温度数据"""
         status_msg = BatteryStatus()
         try:
-            # 基础电池信息解析
-            status_msg.total_voltage = ((data[0] << 8) | data[1]) * 0.01
-            status_msg.current = self.parse_current(data[2:4])
-            status_msg.remaining_capacity = ((data[4] << 8) | data[5]) * 0.01
-            status_msg.nominal_capacity = ((data[6] << 8) | data[7]) * 0.01
-            status_msg.cycle_count = (data[8] << 8) | data[9]
+            # 1. 协议校验：先检查数据长度是否满足基础字段需求（协议规定0x03指令响应数据段至少23字节）
+            min_data_len = 23  # 基础字段22字节 + 至少1个NTC温度2字节的前1字节（实际需根据NTC个数调整，此处为最小校验）
+            if len(data) < min_data_len:
+                rospy.logerr(f"电池数据长度不足，协议要求至少{min_data_len}字节，实际接收{len(data)}字节")
+                return False
             
+            # 2. 基础电池信息解析（严格遵循协议字段顺序，补充漏读的MOS状态和电池串数字段）
+            status_msg.total_voltage = ((data[0] << 8) | data[1]) * 0.01  # 协议：总电压2字节，单位10mV，计算后转V
+            status_msg.current = self.parse_current(data[2:4])  # 协议：电流2字节，单位10mA，充电正、放电负
+            status_msg.remaining_capacity = ((data[4] << 8) | data[5]) * 0.01  # 协议：剩余容量2字节，单位10mAh
+            status_msg.nominal_capacity = ((data[6] << 8) | data[7]) * 0.01  # 协议：标称容量2字节，单位10mAh
+            status_msg.cycle_count = (data[8] << 8) | data[9]  # 协议：循环次数2字节
+            
+            # 生产日期解析（协议：2字节，格式为年份(高7位)+月份(4位)+日期(5位)）
             year, month, day = self.parse_date(data[10:12])
             status_msg.production_year = year
             status_msg.production_month = month
             status_msg.production_day = day
             
-            status_msg.balance_low = (data[12] << 8) | data[13]
-            status_msg.balance_high = (data[14] << 8) | data[15]
-            status_msg.protection_status = (data[16] << 8) | data[17]
+            status_msg.balance_low = (data[12] << 8) | data[13]  # 协议：均衡状态（1-16串）2字节
+            status_msg.balance_high = (data[14] << 8) | data[15]  # 协议：均衡状态（17-32串）2字节
+            status_msg.protection_status = (data[16] << 8) | data[17]  # 协议：保护状态2字节
             
+            # 软件版本解析（协议：1字节，高4位为主版本、低4位为次版本）
             ver_major = data[18] >> 4
             ver_minor = data[18] & 0x0F
             status_msg.software_version = f"{ver_major}.{ver_minor}"
-            status_msg.batttery_remaining = data[19]
             
-            # 温度数据解析和存储
-            ntc_count = data[22]
+            status_msg.batttery_remaining = data[19]  # 协议：剩余容量百分比（RSOC）1字节
+            
+            # 补充协议中漏读的字段（MOS控制状态、电池串数），确保后续索引不偏移
+            status_msg.mos_state = data[20]  # 协议：第20字节为MOS控制状态，bit0充电、bit1放电（0关闭、1打开）
+            status_msg.battery_series = data[21]  # 协议：第21字节为电池串数
+            
+            # 3. 温度数据解析（严格遵循协议NTC字段定义）
+            ntc_count = data[22]  # 协议：第22字节为NTC个数（温度探头数量）
+            # 校验：NTC温度数据总长度是否匹配（每个NTC占2字节，需满足数据总长 >= 23 + 2*ntc_count -1）
+            required_data_len = 23 + 2 * ntc_count - 1
+            if len(data) < required_data_len:
+                rospy.logerr(f"NTC温度数据长度不足，协议要求{required_data_len}字节（NTC个数{ntc_count}），实际接收{len(data)}字节")
+                self.current_temperatures = []
+                return False
+            
             self.current_temperatures = []  # 清空旧温度数据
             for i in range(ntc_count):
-                idx = 23 + i * 2
-                raw_temp = (data[idx] << 8) | data[idx+1]
+                idx = 23 + i * 2  # 协议：NTC数据从第23字节开始，每个占2字节（高字节在前）
+                # 校验索引是否越界（避免极端情况下ntc_count异常导致错误）
+                if idx + 1 >= len(data):
+                    rospy.logerr(f"NTC温度解析索引越界，NTC序号{i}，索引{idx}超出数据长度{len(data)}")
+                    break
+                # 协议：NTC数据单位0.1K（绝对温度），计算公式：实际温度=(原始值-2731)/10.0
+                raw_temp = (data[idx] << 8) | data[idx + 1]
                 temp = (raw_temp - 2731) / 10.0
                 rounded_temp = round(temp, 1)
                 status_msg.temperatures.append(rounded_temp)
                 self.current_temperatures.append(rounded_temp)
             
-            # 发布平均温度用于控制
+            # 4. 发布平均温度（基于有效温度数据）
             if self.current_temperatures:
                 avg_temp = sum(self.current_temperatures) / len(self.current_temperatures)
                 temp_msg = Float32()
                 temp_msg.data = avg_temp
                 self.temperature_pub.publish(temp_msg)
+            else:
+                rospy.logwarn("无有效NTC温度数据，跳过平均温度发布")
             
-            # 发布电池状态
+            # 5. 发布电池状态
             self.battery_pub.publish(status_msg)
-            rospy.loginfo("电池状态发布完成，温度数据已更新")
+            # rospy.loginfo(f"电池状态发布完成，解析NTC数量{len(self.current_temperatures)}个，电池串数{status_msg.battery_series}串")
             return True
             
-        except Exception as e:
-            rospy.logerr(f"电池数据解析错误: {e}")
+        except IndexError as e:
+            rospy.logerr(f"电池数据解析索引越界：{e}，可能是数据长度不足或字段索引错误")
             return False
-
+        except ValueError as e:
+            rospy.logerr(f"电池数据数值解析错误：{e}，可能是数据格式不符合协议")
+            return False
+        except Exception as e:
+            rospy.logerr(f"电池数据解析未知错误：{e}")
+            return False
+        
     def send_relay_command(self, command_data):
         """发送继电器命令"""
         try:

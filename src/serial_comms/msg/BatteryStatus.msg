@@ -1,6 +1,9 @@
 float32 total_voltage       # 总电压(V)
 float32 current             # 电流(A)，正值为充电，负值为放电
 float32 remaining_capacity  # 剩余容量(Ah)
+uint8 mos_state
+uint8 battery_series
+uint8 ntc_count
 float32 nominal_capacity    # 标称容量(Ah)
 uint16 cycle_count          # 循环次数
 uint16 production_year      # 生产年份
