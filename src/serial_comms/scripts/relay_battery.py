@@ -102,7 +102,20 @@ class BatteryRelayNode:
         except Exception as e:
             rospy.logerr(f"串口连接失败: {e}")
             return False
-
+        
+    def calculate_crc(self, data):
+        """Modbus CRC16校验计算"""
+        crc = 0xFFFF
+        for byte in data:
+            crc ^= byte
+            for _ in range(8):
+                if crc & 0x0001:
+                    crc >>= 1
+                    crc ^= 0xA001
+                else:
+                    crc >>= 1
+        return struct.pack('<H', crc)
+    
     def parse_date(self, raw_date):
         """解析电池生产日期"""
         value = (raw_date[0] << 8) | raw_date[1]

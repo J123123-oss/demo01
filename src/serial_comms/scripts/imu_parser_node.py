@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import rospy
 import serial
 import struct
@@ -13,7 +14,7 @@ class IMUParser:
         rospy.init_node('imu_parser_node')
         
         # 参数配置
-        self.port = rospy.get_param('~serial_port', '/dev/imu485')
+        self.port = rospy.get_param('~serial_port', '/dev/IMU')
         self.baudrate = rospy.get_param('~baudrate', 115200)
         self.device_addr = 0x50
         self.rx_frame_length = 7
@@ -93,7 +94,7 @@ class IMUParser:
             self.working = True
             # 启动定时器
             self.timer = rospy.Timer(rospy.Duration(0.2), self.send_query_cmd)
-            rospy.loginfo("IMU工作已启动")
+            rospy.loginfo("IMU工作已启动(imu_parser_node)")
 
     def stop(self):
         """停止IMU工作"""
@@ -102,7 +103,7 @@ class IMUParser:
             if self.timer:
                 self.timer.shutdown()
                 self.timer = None
-            rospy.loginfo("IMU工作已停止")
+            rospy.loginfo("IMU工作已停止(imu_parser_node)")
     def handle_start(self, req):
         self.start()
         return std_srvs.srv.TriggerResponse(success=True, message="IMU started")

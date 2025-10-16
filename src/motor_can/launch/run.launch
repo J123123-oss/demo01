@@ -17,15 +17,15 @@
 
     </node>
     <!-- <node pkg="serial_comms" type="battery_imu_node.py" name="battery_imu_node"  /> -->
-    <node pkg="serial_comms" type="relay_battery.py" name="relay_battery" output="screen" >
+    <!-- <node pkg="serial_comms" type="relay_battery.py" name="relay_battery" output="screen" > -->
     <!-- 高温阈值  |    高温阈值  |    检查间隔 -->
-        <param name="~temperature_threshold_high" value="8.5"/>
-        <param name="~temperature_threshold_low" value="5.0"/>
-        <param name="~battery_check_interval" value="59.1"/>
-        <param name="~relay_check_interval" value="59.3"/>
-    </node>
+        <!-- <param name="~temperature_threshold_high" value="8.5"/> -->
+        <!-- <param name="~temperature_threshold_low" value="5.0"/> -->
+        <!-- <param name="~battery_check_interval" value="59.1"/> -->
+        <!-- <param name="~relay_check_interval" value="59.3"/> -->
+    <!-- </node> -->
     <!-- IMU单独节点 -->
-    <node pkg="serial_comms" type="imu_inspvae.py" name="imu_inspvae" />
+    <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
     <!-- 接近开关使用CAN协议 -->
     <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" />
     <!-- 控制电缸节点 -->

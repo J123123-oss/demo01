@@ -585,10 +585,6 @@ class ServoDriveController:
             time.sleep(0.3)  # 等待故障清除
 
         rospy.loginfo(f"配置电机 {motor_id}: 速度={int(velocity/rate)}, 加速度={acceleration}, 减速度={deceleration}")
-        
-        #同步开启IMU
-        self.start_imu()
-
         self.start_motor(motor_id)
         self.set_velocity_mode(motor_id)
         self.set_target_velocity(motor_id, velocity)  #输出转换为脉冲/秒
@@ -791,7 +787,7 @@ class ServoDriveController:
                     self.progress = 100
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
-
+                    self.stop_imu()
 
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
@@ -834,6 +830,8 @@ class ServoDriveController:
                 self.auto_step = None
                 self.is_lowstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
+                self.stop_imu()
+
                 rospy.loginfo("——————————————————————由LOWSTOP至进仓完成——————————————————————")
                 rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
                 for i in range(50):
@@ -862,6 +860,7 @@ class ServoDriveController:
                 self.auto_step = None
                 self.is_upstop = False
                 self.elevator_stage = 0  # 重置电缸阶段
+                self.stop_imu()
                 rospy.loginfo("——————————————————————由UPSTOP至进仓完成——————————————————————")
                 rospy.logwarn("---------- 强制刷新缓冲区开始 ----------")
                 for i in range(50):
@@ -950,7 +949,11 @@ class ServoDriveController:
                 self.enable_drive_flag = False
                 self.main_board = False # 主控板报警表示电量低于阈值无法启动
                 self.set_state("STOP")
+                self.stop_imu()
                 return
+            #同步开启IMU
+            self.start_imu()
+
             # 阶段0: 开始抬升电缸
             if self.elevator_stage == 0:
                 rospy.loginfo("电缸抬起...")
@@ -1594,17 +1597,28 @@ class ServoDriveController:
 
         rospy.logwarn(f"设置电机 {motor_id} {param_name} 超时，可能未生效")
         return False
-    def start_imu():
-        rospy.wait_for_service('/imu_parser_node/start_imu')
-        start_srv = rospy.ServiceProxy('/imu_parser_node/start_imu', Trigger)
-        resp = start_srv()
-        print(resp.message)
+    
+    def start_imu(self):
+        while not rospy.is_shutdown():
+            try:
+                rospy.wait_for_service('/imu_parser_node/start_imu', timeout=5)
+                start_srv = rospy.ServiceProxy('/imu_parser_node/start_imu', Trigger)
+                resp = start_srv()
+                print(resp.message)
+                break
+            except Exception as e:
+                print(f"等待IMU服务中: {e}")
+                time.sleep(1)
 
-    def stop_imu():
-        rospy.wait_for_service('/imu_parser_node/stop_imu')
-        stop_srv = rospy.ServiceProxy('/imu_parser_node/stop_imu', Trigger)
-        resp = stop_srv()
-        print(resp.message)
+    def stop_imu(self):
+        try:
+            rospy.wait_for_service('/imu_parser_node/stop_imu')
+            stop_srv = rospy.ServiceProxy('/imu_parser_node/stop_imu', Trigger)
+            resp = stop_srv()
+            print(resp.message)
+        except Exception as e:
+            print(f"调用IMU停止服务失败: {e}")
+
     @staticmethod
     def keyboard_listener(controller):
         rospy.loginfo("按键控制：s=停止, f=前进, b=后退")
@@ -1618,6 +1632,7 @@ class ServoDriveController:
 def main():
     rospy.init_node("motor_canopen_node")
     controller = ServoDriveController()
+    controller.start_imu()
     config = controller.load_config()
     if not config or "motors" not in config or not config["motors"]:
         rospy.logerr("未找到有效配置，请检查配置文件")
