@@ -245,7 +245,7 @@ class BatteryRelayNode:
                 rospy.logwarn("当前时间不在允许开启继电器的时段（8:00-17:00），请求被拒绝")
                 return False
 
-        max_retries = 3
+        max_retries = 10
         for attempt in range(max_retries):
             if enable:
                 command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
@@ -554,3 +554,8 @@ if __name__ == '__main__':
         pass
     except Exception as e:
         rospy.logerr(f"节点运行异常: {e}")
+    finally:
+        # 程序退出前，主动关闭继电器
+        if node is not None:
+            rospy.loginfo("程序退出，主动关闭继电器")
+            node.enable_relay(False)
