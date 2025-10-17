@@ -154,7 +154,7 @@ class BatteryIMURelayNode:
             # 1. 协议校验：先检查数据长度是否满足基础字段需求（协议规定0x03指令响应数据段至少23字节）
             min_data_len = 23  # 基础字段22字节 + 至少1个NTC温度2字节的前1字节（实际需根据NTC个数调整，此处为最小校验）
             if len(data) < min_data_len:
-                rospy.logerr(f"电池数据长度不足，协议要求至少{min_data_len}字节，实际接收{len(data)}字节")
+                rospy.loginfo(f"电池数据长度不足，协议要求至少{min_data_len}字节，实际接收{len(data)}字节")
                 return False
             
             # 2. 基础电池信息解析（严格遵循协议字段顺序，补充漏读的MOS状态和电池串数字段）
@@ -190,7 +190,7 @@ class BatteryIMURelayNode:
             # 校验：NTC温度数据总长度是否匹配（每个NTC占2字节，需满足数据总长 >= 23 + 2*ntc_count -1）
             required_data_len = 23 + 2 * ntc_count - 1
             if len(data) < required_data_len:
-                rospy.logerr(f"NTC温度数据长度不足，协议要求{required_data_len}字节（NTC个数{ntc_count}），实际接收{len(data)}字节")
+                rospy.loginfo(f"NTC温度数据长度不足，协议要求{required_data_len}字节（NTC个数{ntc_count}），实际接收{len(data)}字节")
                 self.current_temperatures = []
                 return False
             
@@ -199,7 +199,7 @@ class BatteryIMURelayNode:
                 idx = 23 + i * 2  # 协议：NTC数据从第23字节开始，每个占2字节（高字节在前）
                 # 校验索引是否越界（避免极端情况下ntc_count异常导致错误）
                 if idx + 1 >= len(data):
-                    rospy.logerr(f"NTC温度解析索引越界，NTC序号{i}，索引{idx}超出数据长度{len(data)}")
+                    rospy.loginfo(f"NTC温度解析索引越界，NTC序号{i}，索引{idx}超出数据长度{len(data)}")
                     break
                 # 协议：NTC数据单位0.1K（绝对温度），计算公式：实际温度=(原始值-2731)/10.0
                 raw_temp = (data[idx] << 8) | data[idx + 1]
@@ -223,13 +223,13 @@ class BatteryIMURelayNode:
             return True
             
         except IndexError as e:
-            rospy.logerr(f"电池数据解析索引越界：{e}，可能是数据长度不足或字段索引错误")
+            rospy.loginfo(f"电池数据解析索引越界：{e}，可能是数据长度不足或字段索引错误")
             return False
         except ValueError as e:
-            rospy.logerr(f"电池数据数值解析错误：{e}，可能是数据格式不符合协议")
+            rospy.loginfo(f"电池数据数值解析错误：{e}，可能是数据格式不符合协议")
             return False
         except Exception as e:
-            rospy.logerr(f"电池数据解析未知错误：{e}")
+            rospy.loginfo(f"电池数据解析未知错误：{e}")
             return False
 
     def parse_imu_response(self, frame):
@@ -278,7 +278,7 @@ class BatteryIMURelayNode:
                 rospy.logwarn("当前时间不在允许开启继电器的时段（8:00-17:00），请求被拒绝")
                 return False
 
-        max_retries = 3
+        max_retries = 10
         for attempt in range(max_retries):
             if enable:
                 command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
@@ -534,7 +534,7 @@ class BatteryIMURelayNode:
 
                             # 帧头分流逻辑
                             if byte_val == 0xDD:
-                                rospy.loginfo(f"检测到电池数据帧头: {hex_str}")
+                                # rospy.loginfo(f"检测到电池数据帧头: {hex_str}")
                                 if len(self.battery_buffer) > 0:
                                     rospy.logwarn("电池缓冲区已有数据，可能有帧丢失")
                                 self.battery_buffer.clear()
@@ -664,3 +664,8 @@ if __name__ == '__main__':
         pass
     except Exception as e:
         rospy.logerr(f"节点运行异常: {e}")
+    finally:
+        # 程序退出前，主动关闭继电器
+        if node is not None:
+            rospy.loginfo("程序退出，主动关闭继电器")
+            node.enable_relay(False)
