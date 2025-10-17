@@ -45,7 +45,6 @@ while true; do
                 
                 echo "$(date): 拨号失败，10秒后再次尝试..."
                 sleep 10
-                reboot
             done
         else
             sleep 5

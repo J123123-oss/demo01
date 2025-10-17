@@ -1,5 +1,5 @@
 #!/bin/bash
-SERIAL_DEV="/dev/ttyUSB3"
+SERIAL_DEV="/dev/4G-time-sync"
 BAUD_RATE="115200"
 TIMEOUT=5
 

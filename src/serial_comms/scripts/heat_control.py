@@ -202,7 +202,7 @@ class RelayController:
             status = self.read_relay_status()
             rospy.loginfo("Relay status after enable: %s", "ON" if status else "OFF")
         else:
-            rospy.logerror("Failed to enable relay")
+            rospy.logerr("Failed to enable relay")
         
         # 测试3: 关闭继电器
         rospy.loginfo("Test 3: Disabling relay")
@@ -212,7 +212,7 @@ class RelayController:
             status = self.read_relay_status()
             rospy.loginfo("Relay status after disable: %s", "ON" if status else "OFF")
         else:
-            rospy.logerror("Failed to disable relay")
+            rospy.logerr("Failed to disable relay")
         
         rospy.loginfo("Relay test sequence completed")
 
@@ -222,7 +222,7 @@ def main():
     controller = RelayController()
     
     # 如果指定了测试参数，运行测试序列
-    if rospy.get_param('~run_test', False):
+    if rospy.get_param('~run_test', True):
         controller.run_test_sequence()
     
     rospy.loginfo("Relay controller node is running")

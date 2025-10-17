@@ -19,10 +19,11 @@ STATE_WAITING_RELAY = 3
 class BatteryRelayNode:
     def __init__(self):
         rospy.init_node('battery_imu_node')
-        
-        # 时间阈值管理
+        # 新增：周期控制参数（核心修改）
+        self.cycle_interval = rospy.get_param('~cycle_interval', 10.0)  # 每轮流程间隔时间（秒）
+        self.last_cycle_finish = 0  # 上一轮流程完成时间戳
+        # 时间管理（仅保留必要时间戳）
         self.last_battery_sent = 0
-        self.last_relay_check = 0
         self.battery_buffer = bytearray()
         self.high_temp_triggered = False  # 高温触发标志
         self.low_temp_triggered = False   # 低温触发标志
@@ -30,16 +31,17 @@ class BatteryRelayNode:
         # 温度控制参数
         self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 1.0)  # 高温阈值
         self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', -10.0)    # 低温阈值
-        self.battery_check_interval = rospy.get_param('~battery_check_interval', 10.1)             # 电池检查间隔
-        self.relay_check_interval = rospy.get_param('~relay_check_interval', 11.2)             # 继电器检查间隔
-        # self.current_relay_state = False  # 当前继电器状态
+        
+        # 串行执行状态标记（核心修改）
+        self.is_battery_running = False  # True=正在处理电池任务
+        self.battery_process_done = False  # 电池处理完成标记（用于触发继电器）
         
         # 获取串口参数
         port = rospy.get_param('~serial_port', '/dev/IMU')
         baudrate = rospy.get_param('~baudrate', 115200)
         self.relay_address = rospy.get_param('~relay_address', 0x02)
         
-        # 添加串口访问锁，避免并发访问冲突
+        # 串口访问锁
         self.serial_lock = threading.Lock()
         
         # 初始化串口
@@ -49,19 +51,19 @@ class BatteryRelayNode:
             rospy.signal_shutdown("串口初始化失败")
             return
 
-        # 初始化继电器状态为实际状态（加入循环重试机制）
-        init_max_retries = 3  # 最大重试次数
-        retry_interval = 1  # 重试间隔时间（秒）
+        # 初始化继电器状态（带重试）
+        init_max_retries = 3
+        retry_interval = 1
         retry_count = 0
         relay_status = None
 
         while retry_count < init_max_retries:
             relay_status = self.read_relay_status()
             if relay_status is not None:
-                break  # 获取到状态则退出循环
+                break
             retry_count += 1
             rospy.loginfo(f"第 {retry_count} 次重试读取继电器状态...")
-            rospy.sleep(retry_interval)  # 等待重试间隔
+            rospy.sleep(retry_interval)
 
         if relay_status is not None:
             self.current_relay_state = relay_status
@@ -72,11 +74,10 @@ class BatteryRelayNode:
 
         # 初始化状态机
         self.current_state = STATE_READY
-        self.loop_counter = 0
         self.battery_timeout = 0
-        self.relay_timeout = 0
         self.battery_retry_count = 0
-        self.max_battery_retry = 3  # 增加重试次数
+        self.max_battery_retry = 3
+        self.batttery_remaining = None
         
         # 电池03指令请求帧
         self.REQUEST_BASIC_FRAME = bytes.fromhex('DD A5 03 00 FF FD 77')
@@ -96,14 +97,14 @@ class BatteryRelayNode:
         # 电池温度数据
         self.current_temperatures = []
         
-        # 添加统计信息
+        # 统计信息
         self.battery_query_count = 0
         self.battery_success_count = 0
         
-        rospy.loginfo("电池-继电器集成节点初始化完成")
+        rospy.loginfo("电池-继电器集成节点初始化完成（串行模式：电池→继电器）")
 
     def init_serial(self, port, baudrate):
-        """串口初始化"""
+        """串口初始化（延长超时时间）"""
         try:
             self.ser = serial.Serial(
                 port=port,
@@ -111,7 +112,7 @@ class BatteryRelayNode:
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=0.05
+                timeout=0.05  # 延长超时时间至50ms，确保完整接收
             )
             rospy.loginfo(f"串口连接成功: {port}")
             return True
@@ -149,112 +150,107 @@ class BatteryRelayNode:
         """解析电池响应数据帧并存储温度数据"""
         status_msg = BatteryStatus()
         try:
-            # 1. 协议校验：先检查数据长度是否满足基础字段需求（协议规定0x03指令响应数据段至少23字节）
-            min_data_len = 23  # 基础字段22字节 + 至少1个NTC温度2字节的前1字节（实际需根据NTC个数调整，此处为最小校验）
+            min_data_len = 23
             if len(data) < min_data_len:
                 rospy.logerr(f"电池数据长度不足，协议要求至少{min_data_len}字节，实际接收{len(data)}字节")
                 return False
             
-            # 2. 基础电池信息解析（严格遵循协议字段顺序，补充漏读的MOS状态和电池串数字段）
-            status_msg.total_voltage = ((data[0] << 8) | data[1]) * 0.01  # 协议：总电压2字节，单位10mV，计算后转V
-            status_msg.current = self.parse_current(data[2:4])  # 协议：电流2字节，单位10mA，充电正、放电负
-            status_msg.remaining_capacity = ((data[4] << 8) | data[5]) * 0.01  # 协议：剩余容量2字节，单位10mAh
-            status_msg.nominal_capacity = ((data[6] << 8) | data[7]) * 0.01  # 协议：标称容量2字节，单位10mAh
-            status_msg.cycle_count = (data[8] << 8) | data[9]  # 协议：循环次数2字节
+            # 基础电池信息解析
+            status_msg.total_voltage = ((data[0] << 8) | data[1]) * 0.01
+            status_msg.current = self.parse_current(data[2:4])
+            status_msg.remaining_capacity = ((data[4] << 8) | data[5]) * 0.01
+            status_msg.nominal_capacity = ((data[6] << 8) | data[7]) * 0.01
+            status_msg.cycle_count = (data[8] << 8) | data[9]
             
-            # 生产日期解析（协议：2字节，格式为年份(高7位)+月份(4位)+日期(5位)）
+            # 生产日期解析
             year, month, day = self.parse_date(data[10:12])
             status_msg.production_year = year
             status_msg.production_month = month
             status_msg.production_day = day
             
-            status_msg.balance_low = (data[12] << 8) | data[13]  # 协议：均衡状态（1-16串）2字节
-            status_msg.balance_high = (data[14] << 8) | data[15]  # 协议：均衡状态（17-32串）2字节
-            status_msg.protection_status = (data[16] << 8) | data[17]  # 协议：保护状态2字节
+            status_msg.balance_low = (data[12] << 8) | data[13]
+            status_msg.balance_high = (data[14] << 8) | data[15]
+            status_msg.protection_status = (data[16] << 8) | data[17]
             
-            # 软件版本解析（协议：1字节，高4位为主版本、低4位为次版本）
+            # 软件版本解析
             ver_major = data[18] >> 4
             ver_minor = data[18] & 0x0F
             status_msg.software_version = f"{ver_major}.{ver_minor}"
             
-            status_msg.batttery_remaining = data[19]  # 协议：剩余容量百分比（RSOC）1字节
+            status_msg.batttery_remaining = data[19]
+            status_msg.mos_state = data[20]
+            status_msg.battery_series = data[21]
             
-            # 补充协议中漏读的字段（MOS控制状态、电池串数），确保后续索引不偏移
-            status_msg.mos_state = data[20]  # 协议：第20字节为MOS控制状态，bit0充电、bit1放电（0关闭、1打开）
-            status_msg.battery_series = data[21]  # 协议：第21字节为电池串数
-            
-            # 3. 温度数据解析（严格遵循协议NTC字段定义）
-            ntc_count = data[22]  # 协议：第22字节为NTC个数（温度探头数量）
-            # 校验：NTC温度数据总长度是否匹配（每个NTC占2字节，需满足数据总长 >= 23 + 2*ntc_count -1）
+            # 温度数据解析
+            ntc_count = data[22]
             required_data_len = 23 + 2 * ntc_count - 1
             if len(data) < required_data_len:
                 rospy.logerr(f"NTC温度数据长度不足，协议要求{required_data_len}字节（NTC个数{ntc_count}），实际接收{len(data)}字节")
                 self.current_temperatures = []
                 return False
             
-            self.current_temperatures = []  # 清空旧温度数据
+            self.current_temperatures = []
             for i in range(ntc_count):
-                idx = 23 + i * 2  # 协议：NTC数据从第23字节开始，每个占2字节（高字节在前）
-                # 校验索引是否越界（避免极端情况下ntc_count异常导致错误）
+                idx = 23 + i * 2
                 if idx + 1 >= len(data):
                     rospy.logerr(f"NTC温度解析索引越界，NTC序号{i}，索引{idx}超出数据长度{len(data)}")
                     break
-                # 协议：NTC数据单位0.1K（绝对温度），计算公式：实际温度=(原始值-2731)/10.0
                 raw_temp = (data[idx] << 8) | data[idx + 1]
                 temp = (raw_temp - 2731) / 10.0
                 rounded_temp = round(temp, 1)
                 status_msg.temperatures.append(rounded_temp)
                 self.current_temperatures.append(rounded_temp)
             
-            # 4. 发布平均温度（基于有效温度数据）
+            # 发布平均温度
             if self.current_temperatures:
                 avg_temp = sum(self.current_temperatures) / len(self.current_temperatures)
                 temp_msg = Float32()
                 temp_msg.data = avg_temp
                 self.temperature_pub.publish(temp_msg)
-            else:
-                rospy.logwarn("无有效NTC温度数据，跳过平均温度发布")
             
-            # 5. 发布电池状态
+            # 发布电池状态
+            print("batttery_remaining:",status_msg.batttery_remaining)
             self.battery_pub.publish(status_msg)
-            # rospy.loginfo(f"电池状态发布完成，解析NTC数量{len(self.current_temperatures)}个，电池串数{status_msg.battery_series}串")
             return True
             
-        except IndexError as e:
-            rospy.logerr(f"电池数据解析索引越界：{e}，可能是数据长度不足或字段索引错误")
-            return False
-        except ValueError as e:
-            rospy.logerr(f"电池数据数值解析错误：{e}，可能是数据格式不符合协议")
-            return False
         except Exception as e:
-            rospy.logerr(f"电池数据解析未知错误：{e}")
+            rospy.logerr(f"电池数据解析错误：{e}")
             return False
         
     def send_relay_command(self, command_data):
-        """发送继电器命令"""
+        """发送继电器命令（增加帧头校验，过滤电池数据）"""
         try:
-            # 使用锁保护串口访问
             with self.serial_lock:
+                # 发送前强制清空串口缓冲区，避免残留电池数据
+                self.ser.flushInput()
+                self.ser.flushOutput()
+                
                 crc = self.calculate_crc(command_data)
                 full_command = command_data + crc
                 self.ser.write(full_command)
                 rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
                 
-                # 等待响应
-                time.sleep(0.05)
-                response = self.ser.read(8)
+                # 等待响应（延长超时至100ms，确保继电器有足够时间回复）
+                time.sleep(0.1)
+                response = self.ser.read(8)  # Modbus响应通常为8字节
                 
             if len(response) > 0:
                 rospy.loginfo("接收继电器响应: %s", ' '.join(['%02X' % b for b in response]))
-                if len(response) >= 7 and response[:6] == command_data:
+                
+                # 关键校验：继电器响应必须以自身地址（0x02）和对应功能码开头
+                # command_data[0]是继电器地址，command_data[1]是功能码（0x05或0x01）
+                if len(response) >= 2 and response[0] == command_data[0] and response[1] == command_data[1]:
                     return True
+                else:
+                    rospy.logwarn("收到非继电器响应（可能是电池数据），忽略")
+                    return False
             return False
         except Exception as e:
             rospy.logerr(f"继电器通信错误: {e}")
             return False
+
     def enable_relay(self, enable=True):
         """开启或关闭继电器（仅限白天8:00-17:00可开启）"""
-        # 时间限制：只有8:00-17:00允许开启
         if enable:
             now = datetime.datetime.now()
             if not (8 <= now.hour < 17):
@@ -273,14 +269,13 @@ class BatteryRelayNode:
             success = self.send_relay_command(command_data)
             if success:
                 self.current_relay_state = enable
-                # 发布继电器状态
                 status_msg = Bool()
                 status_msg.data = bool(self.current_relay_state) if self.current_relay_state is not None else None
                 self.relay_status_pub.publish(status_msg)
                 return True
             else:
                 rospy.logwarn(f"继电器命令发送失败，重试 {attempt + 1}/{max_retries}")
-                time.sleep(0.1)  # 等待后重试
+                time.sleep(0.1)
         
         rospy.logerr("继电器命令发送失败，已达到最大重试次数")
         return False
@@ -291,7 +286,6 @@ class BatteryRelayNode:
         rospy.loginfo("发送继电器状态查询")
         
         try:
-            # 使用锁保护串口访问
             with self.serial_lock:
                 crc = self.calculate_crc(command_data)
                 full_command = command_data + crc
@@ -315,7 +309,7 @@ class BatteryRelayNode:
             return None
 
     def temperature_based_control(self):
-        """基于温度控制继电器，每种情况只触发一次，温度恢复后可再次触发"""
+        """基于温度控制继电器（串行执行，依赖电池数据）"""
         if not self.current_temperatures:
             rospy.logwarn("无温度数据，跳过继电器控制")
             return
@@ -331,7 +325,7 @@ class BatteryRelayNode:
             if self.enable_relay(False):
                 rospy.loginfo("继电器已关闭")
                 self.high_temp_triggered = True
-                self.low_temp_triggered = False  # 高温触发后允许低温再次触发
+                self.low_temp_triggered = False
             else:
                 rospy.logwarn("继电器关闭失败")
 
@@ -341,7 +335,7 @@ class BatteryRelayNode:
             if self.enable_relay(True):
                 rospy.loginfo("继电器已开启")
                 self.low_temp_triggered = True
-                self.high_temp_triggered = False  # 低温触发后允许高温再次触发
+                self.high_temp_triggered = False
             else:
                 rospy.logwarn("继电器开启失败")
 
@@ -356,83 +350,72 @@ class BatteryRelayNode:
         self.relay_status_pub.publish(status_msg)
         
     def run(self):
-        """改进的主状态机循环 - 非阻塞版本"""
-        rospy.loginfo("节点主循环开始运行")
+        """串行定时模式主循环：每间隔cycle_interval秒执行一次“电池→继电器”流程"""
+        rospy.loginfo("节点主循环开始运行（串行定时模式）")
         while not rospy.is_shutdown():
             current_time = time.time()
             
-            # === 优先处理串口数据读取 ===
+            # 1. 优先处理串口数据（最高优先级）
             self.read_serial_data()
             
-            # === 并行处理所有等待状态 ===
-            # 1. 处理电池响应（不阻塞其他状态）
+            # 2. 处理电池响应（与之前一致）
             if self.current_state == STATE_WAITING_BATTERY:
                 if self.process_battery_buffer():
                     self.current_state = STATE_READY
-                    # self.battery_retry_count = 0
                     self.battery_success_count += 1
-                    # rospy.loginfo("电池数据接收完成")
+                    self.is_battery_running = False  # 电池处理完成
+                    self.battery_process_done = True  # 标记为完成，触发继电器
                 elif current_time >= self.battery_timeout:
-                    # rospy.logwarn(f"电池响应超时，重试次数: {self.battery_retry_count}")
                     self.battery_buffer.clear()
-                    # self.battery_retry_count += 1
-                    # if self.battery_retry_count <= self.max_battery_retry:
-                        # if self.send_battery_query():
-                            # self.battery_timeout = current_time + 1.0  # 1秒超时
-                        # else:
-                            # rospy.logerr("电池查询发送失败")
-                    # else:
                     self.current_state = STATE_READY
-                        # self.battery_retry_count = 0
-                        # rospy.logwarn("电池查询重试次数用尽，返回就绪状态")
+                    self.is_battery_running = False  # 超时重置状态
             
-            # 2. 处理继电器响应
-            if self.current_state == STATE_WAITING_RELAY:
-                # 继电器响应通常是即时的，短暂等待后返回就绪
-                if current_time >= self.relay_timeout:
-                    self.current_state = STATE_READY
-                    rospy.logwarn("继电器响应超时")
+            # 3. 串行核心：电池完成后自动触发继电器控制
+            if self.battery_process_done:
+                self.temperature_based_control()  # 执行继电器控制
+                rospy.loginfo(f"本轮串行流程完成（耗时{current_time - self.last_battery_sent:.2f}秒）")
+                self.battery_process_done = False  # 重置标记
+                self.last_cycle_finish = current_time  # 记录本轮完成时间（核心修改）
             
-            # === 发送新请求（优化优先级）===
-            if self.current_state == STATE_READY:
-                # 其次处理电池查询（低优先级）
-                if current_time - self.last_battery_sent >= self.battery_check_interval:
+            # 4. 定时触发下一轮：仅当时间间隔满足且无任务运行时
+            if self.current_state == STATE_READY and not self.is_battery_running:
+                # 检查是否达到间隔时间（核心修改）
+                if current_time - self.last_cycle_finish >= self.cycle_interval:
                     if self.send_battery_query():
                         self.last_battery_sent = current_time
                         self.battery_query_count += 1
                         self.current_state = STATE_WAITING_BATTERY
-                        self.battery_timeout = current_time + 1.0  # 1秒超时
+                        self.battery_timeout = current_time + 1.0  # 电池响应超时时间
+                        self.is_battery_running = True  # 标记为正在处理电池
+                        rospy.loginfo(f"开始新轮串行流程（距离上轮{current_time - self.last_cycle_finish:.2f}秒）")
                     else:
-                        rospy.logerr("电池查询发送失败")
-                
-                # 最后处理继电器温度控制（最低优先级）
-                elif current_time - self.last_relay_check >= self.relay_check_interval:
-                    self.temperature_based_control()
-                    self.last_relay_check = current_time
-                    
-                    # 定期输出统计信息
-                    if self.battery_query_count > 0:
-                        battery_success_rate = (self.battery_success_count / self.battery_query_count) * 100
-                        rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
+                        rospy.logerr("电池查询发送失败，1秒后重试")
+                        time.sleep(1.0)
+                else:
+                    # 未达到间隔时间，计算剩余等待时间（可选）
+                    remaining = self.cycle_interval - (current_time - self.last_cycle_finish)
+                    rospy.logdebug(f"等待下一轮流程，剩余{remaining:.2f}秒")
             
             self.rate.sleep()
 
     def send_battery_query(self):
-        """发送电池查询指令"""
+        """发送电池查询指令（强化缓冲区清空）"""
         try:
             if self.ser and self.ser.is_open:
-                # 使用锁保护串口访问
                 with self.serial_lock:
-                    self.battery_buffer.clear()
-                    self.ser.write(b'\x00')
+                    # 发送前彻底清空缓冲区，包括输入输出
+                    self.ser.flushInput()
+                    self.ser.flushOutput()
+                    self.battery_buffer.clear()  # 清空电池缓冲区
+                    
+                    self.ser.write(b'\x00')  # 若此字节无意义可删除，避免干扰
                     time.sleep(0.01)
                     self.ser.write(self.REQUEST_BASIC_FRAME)
                 return True
         except serial.SerialException as e:
             rospy.logerr(f"电池查询发送失败（串口异常）: {e}")
-            # 尝试重新初始化串口
             if self.reinit_serial():
-                return False  # 重新初始化后下次再试
+                return False
         except Exception as e:
             rospy.logerr(f"电池查询发送失败: {e}")
         return False
@@ -464,53 +447,45 @@ class BatteryRelayNode:
             return False
 
     def read_serial_data(self):
-        """改进的串口读取，确保及时处理所有数据"""
+        """优化的串口读取（严格区分电池数据）"""
         try:
             if self.ser and self.ser.is_open:
-                # 使用锁保护串口访问
                 with self.serial_lock:
-                    # 多次读取直到清空缓冲区
-                    for _ in range(3):  # 最多读取3次
+                    for _ in range(3):
                         avail = self.ser.in_waiting
                         if avail == 0:
                             break
                             
                         data = self.ser.read(avail)
                         if data:
-                            # 打印原始数据
                             hex_str = ' '.join(['%02X' % (b if isinstance(b, int) else ord(b)) for b in data])
-                            rospy.loginfo(f"收到485原始数据: {hex_str}")
+                            # rospy.loginfo(f"收到原始数据: {hex_str}")
 
                         for byte in data:
-                            if isinstance(byte, int):
-                                byte_val = byte
-                            else:
-                                byte_val = ord(byte)
+                            byte_val = byte if isinstance(byte, int) else ord(byte)
 
-                            # 只保留电池分流逻辑
+                            # 仅处理电池帧（0xDD开头，且长度未超限）
                             if byte_val == 0xDD:
-                                # rospy.loginfo(f"检测到电池数据帧头: {hex_str}")
                                 if len(self.battery_buffer) > 0:
-                                    rospy.loginfo(f"电池缓冲区当前长度: {len(self.battery_buffer)}")
                                     rospy.logwarn("电池缓冲区已有数据，可能有帧丢失")
-                                    # hex_str1 = ' '.join(['%02X' % (b if isinstance(b, int) else ord(b)) for b in data])
-                                    # rospy.loginfo(f"电池缓冲区: {hex_str1}")
+                                    rospy.loginfo(f"残留数据: {''.join(['%02X' % b for b in self.battery_buffer])}")
                                 self.battery_buffer.clear()
                                 self.battery_buffer.append(byte_val)
-                            elif len(self.battery_buffer) > 0 and self.battery_buffer[0] == 0xDD and len(self.battery_buffer) < 50:
-                                self.battery_buffer.append(byte_val)
-                            else:
-                                rospy.loginfo(f"收到其他类型数据: {byte_val:02X}")
+                            elif self.battery_buffer and self.battery_buffer[0] == 0xDD:
+                                # 电池帧最大长度限制（根据实际协议调整，如64字节）
+                                if len(self.battery_buffer) < 64:
+                                    self.battery_buffer.append(byte_val)
+                                else:
+                                    rospy.logwarn("电池帧长度超限，丢弃")
+                                    self.battery_buffer.clear()
+                            # 非电池数据（如继电器响应）不进入电池缓冲区，由继电器逻辑处理
                         
-                        # 短暂休息避免过度占用CPU
-                        time.sleep(0.001)
-                    
         except serial.SerialException as e:
             rospy.logerr(f"串口读取异常: {e}")
             self.reinit_serial()
         except Exception as e:
             rospy.logwarn(f"串口读取错误: {e}")
-
+            
     def process_battery_buffer(self):
         """处理电池响应数据"""
         MAX_BATTERY_FRAME_LEN = 64
@@ -551,7 +526,7 @@ class BatteryRelayNode:
             data_block = self.battery_buffer[data_start:data_end]
             
             success = self.process_battery_response(data_block)
-            self.battery_buffer.clear()  # 清空整个缓冲区
+            self.battery_buffer.clear()
             return success
         
         return False
@@ -580,6 +555,7 @@ class BatteryRelayNode:
         return response
 
 if __name__ == '__main__':
+    node = None
     try:
         node = BatteryRelayNode()
         node.run()
@@ -588,7 +564,7 @@ if __name__ == '__main__':
     except Exception as e:
         rospy.logerr(f"节点运行异常: {e}")
     finally:
-        # 程序退出前，主动关闭继电器
+        # 程序退出前关闭继电器
         if node is not None:
             rospy.loginfo("程序退出，主动关闭继电器")
             node.enable_relay(False)

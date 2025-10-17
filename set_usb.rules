@@ -1,4 +1,5 @@
 #
 KERNEL=="ttyUSB*" ,KERNELS=="2-1.1" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="singleIMU"
-KERNEL=="ttyUSB*" ,KERNELS=="5-1" ,ATTRS{idProduct}=="0125" ,ATTRS{idVendor}=="2c7c" ,MODE:="0777" ,SYMLINK+="4G"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*" ,KERNELS=="5-1:1.2" ,MODE:="0777", SYMLINK+="4G-modem"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*" ,KERNELS=="5-1:1.3" ,MODE:="0777", SYMLINK+="4G-time-sync"
 #KERNEL=="ttyACM*" ,KERNELS=="4-1" ,ATTRS{idProduct}=="55d4" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK ="SENSOR0"

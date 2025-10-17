@@ -202,6 +202,8 @@ class ServoDriveController:
 
 
         self.progress = 0   # 进度百分比，0-100
+        self.battery_total_voltage = None  # 电池总电压
+        self.battery_current = None  # 电池电流
         self.battery_remaining = None # 电池百分比
         self.battery_temperatures = [] # 电池温度，共3个
         #继电器状态
@@ -383,12 +385,14 @@ class ServoDriveController:
             "status": self.current_status,
             "battery": self.battery_remaining, # 电池百分比,
             "battery_temperatures": self.battery_temperatures, # 电池温度，共3个
+            "battery_total_voltage": "{:.2f}".format(self.battery_total_voltage), # 电池总电压
+            "battery_current": "{:.2f}".format(self.battery_current), # 电池电流
             "progress": self.progress,
-            "imu_yaw": self.imu_yaw,  # IMU偏航角
-            "velocity_up": velocity_up / rate,  # 单位转换为RPM
-            "velocity_low": velocity_low / rate,
-            "velocity_brush": velocity_brush / rate,
-            "velocity_locking": 0,
+            "imu_yaw": "{:.2f}".format(self.imu_yaw),  # IMU偏航角
+            "velocity_up": "{:.2f}".format(velocity_up / rate),  # 单位转换为RPM
+            "velocity_low": "{:.2f}".format(velocity_low / rate),
+            "velocity_brush": "{:.2f}".format(velocity_brush / rate),
+            # "velocity_locking": 0,
             "sensors_status": self.sensors_status,  # 超声波传感器状态
             "device_status": {
             "main_board": self.main_board,
@@ -450,7 +454,11 @@ class ServoDriveController:
     def battery_status_callback(self, msg):
 
         self.battery_remaining = msg.batttery_remaining  # 电池百分比
-        self.battery_temperatures = msg.temperatures  # 电池温度，共3个
+        # 格式化温度，保留一位小数
+        self.battery_temperatures = [round(t, 1) for t in msg.temperatures] if hasattr(msg, "temperatures") else []
+        self.battery_total_voltage = msg.total_voltage  # 电池总电压
+        self.battery_current = msg.current  # 电池电流
+
     def relay_callback(self, msg):
         #继电器状态
         self.relay_status = msg.data
