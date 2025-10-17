@@ -454,10 +454,10 @@ class ServoDriveController:
     def battery_status_callback(self, msg):
 
         self.battery_remaining = msg.batttery_remaining  # 电池百分比
-        # 格式化温度，保留一位小数
+        self.battery_total_voltage = round(msg.total_voltage, 2) if hasattr(msg, "total_voltage") else 0.0
+        self.battery_current = round(msg.current, 2) if hasattr(msg, "current") else 0.0
+         # 格式化温度列表，保留一位小数
         self.battery_temperatures = [round(t, 1) for t in msg.temperatures] if hasattr(msg, "temperatures") else []
-        self.battery_total_voltage = [round(v, 2) for v in msg.total_voltage] if hasattr(msg, "total_voltage") else 0.0
-        self.battery_current = [round(c, 2) for c in msg.current] if hasattr(msg, "current") else 0.0
 
     def relay_callback(self, msg):
         #继电器状态
