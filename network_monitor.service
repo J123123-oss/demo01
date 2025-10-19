@@ -5,7 +5,7 @@ After=network.target
 Wants=network.target
 
 [Service]
-ExecStartPre=/bin/sleep 60
+# ExecStartPre=/bin/sleep 30
   # 延时60秒（关键：开机后等待1分钟）
 ExecStart=/home/orangepi/demo01/network_monitor.sh
   # 脚本的绝对路径

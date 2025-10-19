@@ -12,7 +12,7 @@ from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
 class RelayController:
     def __init__(self):
         # ROS参数
-        self.port = rospy.get_param('~port', '/dev/IMU')
+        self.port = rospy.get_param('~port', '/dev/Battery-Relay')
         self.baudrate = rospy.get_param('~baudrate', 115200)
         self.slave_address = rospy.get_param('~slave_address', 0x02)
         self.timeout = rospy.get_param('~timeout', 1.0)
@@ -187,34 +187,35 @@ class RelayController:
     
     def run_test_sequence(self):
         """运行测试序列"""
-        rospy.loginfo("Starting relay test sequence...")
-        
-        # 测试1: 读取状态
-        rospy.loginfo("Test 1: Reading relay status")
-        status = self.read_relay_status()
-        rospy.loginfo("Initial relay status: %s", "ON" if status else "OFF")
-        
-        # 测试2: 开启继电器
-        rospy.loginfo("Test 2: Enabling relay")
-        if self.enable_relay(True):
-            rospy.loginfo("Relay enabled successfully")
-            time.sleep(1)
+        while True:
+            rospy.loginfo("Starting relay test sequence...")
+            
+            # 测试1: 读取状态
+            rospy.loginfo("Test 1: Reading relay status")
             status = self.read_relay_status()
-            rospy.loginfo("Relay status after enable: %s", "ON" if status else "OFF")
-        else:
-            rospy.logerr("Failed to enable relay")
-        
-        # 测试3: 关闭继电器
-        rospy.loginfo("Test 3: Disabling relay")
-        if self.enable_relay(False):
-            rospy.loginfo("Relay disabled successfully")
-            time.sleep(1)
-            status = self.read_relay_status()
-            rospy.loginfo("Relay status after disable: %s", "ON" if status else "OFF")
-        else:
-            rospy.logerr("Failed to disable relay")
-        
-        rospy.loginfo("Relay test sequence completed")
+            rospy.loginfo("Initial relay status: %s", "ON" if status else "OFF")
+            
+            # 测试2: 开启继电器
+            rospy.loginfo("Test 2: Enabling relay")
+            if self.enable_relay(True):
+                rospy.loginfo("Relay enabled successfully")
+                time.sleep(1)
+                status = self.read_relay_status()
+                rospy.loginfo("Relay status after enable: %s", "ON" if status else "OFF")
+            else:
+                rospy.logerr("Failed to enable relay")
+            
+            # 测试3: 关闭继电器
+            rospy.loginfo("Test 3: Disabling relay")
+            if self.enable_relay(False):
+                rospy.loginfo("Relay disabled successfully")
+                time.sleep(1)
+                status = self.read_relay_status()
+                rospy.loginfo("Relay status after disable: %s", "ON" if status else "OFF")
+            else:
+                rospy.logerr("Failed to disable relay")
+            
+            rospy.loginfo("Relay test sequence completed")
 
 def main():
     rospy.init_node('relay_controller', anonymous=True)

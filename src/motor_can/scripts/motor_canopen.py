@@ -195,7 +195,7 @@ class ServoDriveController:
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
-        self.pid_kp = 70   # 降低比例增益减少振荡             原100
+        self.pid_kp = 100   # 降低比例增益减少振荡             原100
         self.pid_ki = 0.1  # 提高积分增益增强对持续偏差的纠正   1.5
         self.pid_kd = 10   # 大幅提高微分增益抑制快速变化       20 
         self.pid_correction_max = 150  # 放宽输出限制        200
@@ -365,47 +365,52 @@ class ServoDriveController:
 
     def publish_state(self):
         """发布机器人状态信息，包含速度和状态"""
-        # 更新计数器
-        self.velocity_publish_count += 1
-        
-        # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
-        if self.velocity_publish_count >= self.velocity_publish_interval:
-            # 获取新的速度数据
-            self.last_velocity_up = self.get_actual_velocity(3)
-            self.last_velocity_low = self.get_actual_velocity(2)
-            self.last_velocity_brush = self.get_actual_velocity(4)
-            self.velocity_publish_count = 0  # 重置计数器
-        
-        # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
-        velocity_up = self.last_velocity_up
-        velocity_low = self.last_velocity_low
-        velocity_brush = self.last_velocity_brush
+        try:
+            # 更新计数器
+            self.velocity_publish_count += 1
+            
+            # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
+            if self.velocity_publish_count >= self.velocity_publish_interval:
+                # 获取新的速度数据
+                self.last_velocity_up = self.get_actual_velocity(3)
+                self.last_velocity_low = self.get_actual_velocity(2)
+                self.last_velocity_brush = self.get_actual_velocity(4)
+                self.velocity_publish_count = 0  # 重置计数器
+            
+            # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
+            velocity_up = self.last_velocity_up
+            velocity_low = self.last_velocity_low
+            velocity_brush = self.last_velocity_brush
 
-        state_msg = {
-            "status": self.current_status,
-            "battery": self.battery_remaining, # 电池百分比,
-            "battery_temperatures": self.battery_temperatures, # 电池温度，共3个
-            "battery_total_voltage": self.battery_total_voltage, # 电池总电压
-            "battery_current": self.battery_current, # 电池电流
-            "progress": self.progress,
-            "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-            "velocity_up": round(velocity_up / rate, 2),  # 保留两位小数，数值类型
-            "velocity_low": round(velocity_low / rate, 2),
-            "velocity_brush": round(velocity_brush / rate, 2),
-            # "velocity_locking": 0,
-            "sensors_status": self.sensors_status,  # 超声波传感器状态
-            "device_status": {
-            "main_board": self.main_board,
-            "imu_sensor": self.imu_sensor,
-            "motor_driver": self.motor_driver,
-            "comm_module": True  },
-            "complete_state":self.complete_state, # 任务完成状态
-            "auto_mode": self.auto_mode, # 自动模式开关,默认开
-            "relay_status": self.relay_status,
-            # "auto_step": self.auto_step, # 当前自动程序所在状态
-            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
-        }
-        self.state_pub.publish(json.dumps(state_msg))
+            state_msg = {
+                "status": self.current_status,
+                "battery": self.battery_remaining, # 电池百分比,
+                "battery_temperatures": self.battery_temperatures, # 电池温度，共3个
+                "battery_total_voltage": self.battery_total_voltage, # 电池总电压
+                "battery_current": self.battery_current, # 电池电流
+                "progress": self.progress,
+                "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
+                "velocity_up": round(velocity_up / rate, 2),  # 保留两位小数，数值类型
+                "velocity_low": round(velocity_low / rate, 2),
+                "velocity_brush": round(velocity_brush / rate, 2),
+                # "velocity_locking": 0,
+                "sensors_status": self.sensors_status,  # 超声波传感器状态
+                "device_status": {
+                "main_board": self.main_board,
+                "imu_sensor": self.imu_sensor,
+                "motor_driver": self.motor_driver,
+                "comm_module": True  },
+                "complete_state":self.complete_state, # 任务完成状态
+                "auto_mode": self.auto_mode, # 自动模式开关,默认开
+                "relay_status": self.relay_status,
+                # "auto_step": self.auto_step, # 当前自动程序所在状态
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
+            }
+            self.state_pub.publish(json.dumps(state_msg))
+        except Exception:
+            error_msg = {
+                "status": "ERROR" } # 或者自定义异常内容
+            self.state_pub.publish(json.dumps(error_msg))
 
     def status_callback(self, msg):
         """处理状态消息"""
@@ -454,8 +459,8 @@ class ServoDriveController:
     def battery_status_callback(self, msg):
 
         self.battery_remaining = msg.batttery_remaining  # 电池百分比
-        self.battery_total_voltage = round(msg.total_voltage, 2) if hasattr(msg, "total_voltage") else 0.0
-        self.battery_current = round(msg.current, 2) if hasattr(msg, "current") else 0.0
+        self.battery_total_voltage = round(msg.total_voltage, 2) 
+        self.battery_current = round(msg.current, 2)
          # 格式化温度列表，保留一位小数
         self.battery_temperatures = [round(t, 1) for t in msg.temperatures] if hasattr(msg, "temperatures") else []
 
@@ -690,7 +695,7 @@ class ServoDriveController:
                         elapsed = current_time - self.unloading_start_time
                         # print(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
                         
-                        if elapsed >= self.unloading_timer:
+                        if elapsed >= self.unloading_timer and self.current_status == "UNLOADING":
                             self.set_state("STOP")
                             self.progress = 0
                             self.unloading_start_time = None  # 重置
@@ -719,7 +724,7 @@ class ServoDriveController:
                         elapsed = current_time - self.unloading_start_time
                         # print(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
                         
-                        if elapsed >= self.unloading_timer:
+                        if elapsed >= self.unloading_timer and self.current_status == "UNLOADING":
                             self.set_state("BACKWARD")
                             self.progress = 20
                             self.unloading_start_time = None  # 重置
@@ -960,8 +965,6 @@ class ServoDriveController:
                 self.set_state("STOP")
                 self.stop_imu()
                 return
-            #同步开启IMU
-            self.start_imu()
 
             # 阶段0: 开始抬升电缸
             if self.elevator_stage == 0:
@@ -969,6 +972,8 @@ class ServoDriveController:
                 self.motor_cmd_pub.publish(Int8(data=1))  # 发布电机控制指令
                 self.elevator_start_time = rospy.get_time()  # 记录抬升开始时间
                 self.elevator_stage = 1  # 进入抬升中阶段
+                #同步开启IMU
+                self.start_imu()
                 
             # 阶段1: 等待电缸完成抬升(非阻塞检查)
             elif self.elevator_stage == 1:
@@ -1054,7 +1059,7 @@ class ServoDriveController:
             #         self.set_state("REVERSE")  # 放大角度限制，防止再次进入后退矫正状态
             
 
-            angle_condition_met = (-5 < self.imu_yaw < -1.5 or 1.5 < self.imu_yaw < 5)
+            angle_condition_met = (-5 < self.imu_yaw < -2.5 or 2.5 < self.imu_yaw < 5)
         
             if angle_condition_met:
                 # 第一次检测到角度问题时记录时间
@@ -1088,8 +1093,8 @@ class ServoDriveController:
             # 执行后退矫正
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1  # 标记后退次数
-                if self.has_reverse_counter > 10:  # 连续后退10次后
-                    rospy.logwarn("连续后退10次，可能需要手动干预")
+                if self.has_reverse_counter > 20:  # 连续后退10次后
+                    rospy.logwarn("连续后退20次，可能需要手动干预")
                     self.has_reverse_counter = 0
                     self.set_state("STOP")  # 停止后退
                     self.motor_driver = False  # 预警
@@ -1241,8 +1246,9 @@ class ServoDriveController:
 
         # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测 未使用
         elif self.current_status in ["LOADING", "UNLOADING"]:
-            left_speed = int(self.status_config[self.current_status]["velocity_up"] )
-            right_speed = int(self.status_config[self.current_status]["velocity_low"] )
+            correction = self.pid_correction(self.imu_yaw) * rate
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
@@ -1641,6 +1647,7 @@ class ServoDriveController:
 def main():
     rospy.init_node("motor_canopen_node")
     controller = ServoDriveController()
+    # controller.stop_imu()
     controller.start_imu()
     config = controller.load_config()
     if not config or "motors" not in config or not config["motors"]:

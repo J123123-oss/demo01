@@ -162,7 +162,7 @@ class BatteryMonitor:
 
 if __name__ == '__main__':
     rospy.init_node('battery_monitor')
-    port = rospy.get_param('~serial_port', '/dev/IMU')
+    port = rospy.get_param('~serial_port', '/dev/Battery-Relay')
     monitor = BatteryMonitor(port)
     
     try:
