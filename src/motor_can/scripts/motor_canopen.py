@@ -227,6 +227,9 @@ class ServoDriveController:
             return False
         if new_state == self.current_status and new_state != "PISTON_OUT" and new_state != "PISTON_IN" and new_state != "STOP":
             return False  # 状态未改变
+        if self.current_status in ["FORWARD", "BACKWARD"] and new_state == "CHARGE_OUT" or new_state == "RETURN_DOCK":
+            return False  # 防止运行时异常状态干扰
+            
         # 检查是否从START切换到其他模式
         # if self.current_status == "START" and new_state in ["FORWARD", "BACKWARD", "STOP"]:
         #     self.need_speed_mode_init = True
@@ -1093,8 +1096,8 @@ class ServoDriveController:
             # 执行后退矫正
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1  # 标记后退次数
-                if self.has_reverse_counter > 20:  # 连续后退10次后
-                    rospy.logwarn("连续后退20次，可能需要手动干预")
+                if self.has_reverse_counter > 10:  # 连续后退10次后
+                    rospy.logwarn("连续后退10次，可能需要手动干预")
                     self.has_reverse_counter = 0
                     self.set_state("STOP")  # 停止后退
                     self.motor_driver = False  # 预警
@@ -1245,10 +1248,27 @@ class ServoDriveController:
             
 
         # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测 未使用
-        elif self.current_status in ["LOADING", "UNLOADING"]:
+        elif self.current_status == "UNLOADING":
             correction = self.pid_correction(self.imu_yaw) * rate
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            if (self.last_left_speed != left_speed or
+                self.last_right_speed != right_speed or
+                self.last_brush_speed != brush_speed):
+                # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
+                
+                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, right_speed)
+                self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+        # 6.   LOADING 状态仅滚刷运动   
+        elif self.current_status == "LOADING":
+            left_speed = int(self.status_config[self.current_status]["velocity_up"])
+            right_speed = int(self.status_config[self.current_status]["velocity_low"])
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
