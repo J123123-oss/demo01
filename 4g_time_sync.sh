@@ -2,6 +2,8 @@
 SERIAL_DEV="/dev/4G-time-sync"
 BAUD_RATE="115200"
 TIMEOUT=5
+PROCESS_DELAY=7  # 处理延迟补偿秒数
+ERROR_THRESHOLD=10  # 时间误差阈值（秒）
 
 # 检查串口设备
 if [ ! -c "$SERIAL_DEV" ]; then
@@ -40,15 +42,41 @@ echo "时间: $TIME"
 echo "时区: $TIMEZONE"
 echo "夏令时标志: $DST"
 
-# 组合标准时间格式
+# 组合标准时间格式并添加处理延迟补偿
 FORMATTED_TIME="${DATE//\//-} $TIME"
+echo "原始获取时间: $FORMATTED_TIME"
 
-echo "格式化时间: $FORMATTED_TIME"
+# 将获取的时间转换为时间戳并添加延迟补偿
+REMOTE_TIMESTAMP=$(date -d "$FORMATTED_TIME" +%s)
+if [ -z "$REMOTE_TIMESTAMP" ]; then
+    echo "错误：无法解析获取的时间"
+    exit 1
+fi
 
-sudo date +"%Y%m%d %H:%M:%S" -s "$FORMATTED_TIME"
-sudo hwclock -w
+# 计算补偿后的时间（加上处理延迟）
+COMPENSATED_TIMESTAMP=$((REMOTE_TIMESTAMP + PROCESS_DELAY))
+COMPENSATED_TIME=$(date -d @$COMPENSATED_TIMESTAMP +"%Y-%m-%d %H:%M:%S")
+echo "补偿后时间（+${PROCESS_DELAY}秒）: $COMPENSATED_TIME"
 
-echo "时间校准完成！"
+# 获取当前系统时间戳
+LOCAL_TIMESTAMP=$(date +%s)
+
+# 计算时间误差
+TIME_DIFF=$((REMOTE_TIMESTAMP - LOCAL_TIMESTAMP))
+TIME_DIFF=${TIME_DIFF#-}  # 取绝对值
+
+echo "本地时间与原始获取时间误差: $TIME_DIFF 秒"
+
+# 判断是否需要同步时间（误差大于阈值）
+if [ $TIME_DIFF -gt $ERROR_THRESHOLD ]; then
+    echo "时间误差超过${ERROR_THRESHOLD}秒，执行同步..."
+    sudo date +"%Y%m%d %H:%M:%S" -s "$COMPENSATED_TIME"
+    sudo hwclock -w
+    echo "时间校准完成！"
+else
+    echo "时间误差在${ERROR_THRESHOLD}秒以内，无需同步"
+fi
+
 echo "当前系统时间: $(date)"
 echo "当前UTC时间: $(date -u)"
 echo "当前硬件时间: $(sudo hwclock -r)"

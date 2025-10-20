@@ -1008,7 +1008,7 @@ class ServoDriveController:
                     
                     # 启动20秒等待检查计时器(代替sleep)
                     self.start_time = rospy.get_time()
-                    if self.auto_mode and self.auto_step:
+                    if self.auto_mode and self.auto_step and self.current_status =="START":
                         rospy.loginfo(f"初始化完成，恢复自动流程: {self.auto_step}")
                         self.set_state(self.auto_step)
                 else:

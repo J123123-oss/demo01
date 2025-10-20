@@ -41,7 +41,8 @@ class BatteryParser:
     def __init__(self):
         # 你的测试数据帧
         self.test_frame = bytes.fromhex(
-            "DD 03 00 26 12 CC FF E5 02 A1 07 D0 00 0E 33 0F 00 00 00 00 00 00 A1 22 03 0D 03 0A E3 0A DD 0A D4 00 00 00 07 D0 02 A1 00 18 F6 34 77"
+            "DD 03 00 26 13 72 00 00 03 90 07 D0 00 0F 33 0F 00 00 00 00 00 20 A1 2E 02 0D 03 0A 83 0A 7D 0A 72 00 00 00 07 D0 03 90 00 00 F9 9F 77"
+            # "DD 03 00 26 12 CC FF E5 02 A1 07 D0 00 0E 33 0F 00 00 00 00 00 00 A1 22 03 0D 03 0A E3 0A DD 0A D4 00 00 00 07 D0 02 A1 00 18 F6 34 77"
             # "DD 03 00 26 12 06 00 43 01 A5 07 D0 00 0E 33 0F 00 00 00 00 00 00 A1 15 03 0D 03 0A E6 0A E6 0A D3 00 00 00 07 D0 01 A5 00 F6 F7 B9 77"
         )
         self.battery_buffer = bytearray()

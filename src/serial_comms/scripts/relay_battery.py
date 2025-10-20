@@ -28,7 +28,7 @@ class BatteryRelayNode:
         self.low_temp_triggered = False   # 低温触发标志
         
         # 温度控制参数
-        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 8.5)  # 高温阈值
+        self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 5.0)  # 高温阈值
         self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 3.0)    # 低温阈值
         self.battery_check_interval = rospy.get_param('~battery_check_interval', 5.0)             # 电池检查间隔
         self.relay_check_interval = rospy.get_param('~relay_check_interval', 6.1)             # 继电器检查间隔
@@ -40,7 +40,7 @@ class BatteryRelayNode:
         
         # 添加串口访问锁，避免并发访问冲突
         self.serial_lock = threading.Lock()
-        
+        self.current_relay_state = False  # 默认初始化为关闭状态
         # 初始化串口
         self.ser = None
         self.init_serial(port, baudrate)
@@ -49,7 +49,7 @@ class BatteryRelayNode:
             return
 
         # 初始化继电器状态为实际状态（加入循环重试机制）
-        init_max_retries = 30  # 最大重试次数
+        init_max_retries = 5  # 最大重试次数
         retry_interval = 1  # 重试间隔时间（秒）
         retry_count = 0
         relay_status = None
@@ -117,7 +117,18 @@ class BatteryRelayNode:
         except Exception as e:
             rospy.logerr(f"串口连接失败: {e}")
             return False
-        
+    def calculate_crc(self, data):
+        """Modbus CRC16校验计算"""
+        crc = 0xFFFF
+        for byte in data:
+            crc ^= byte
+            for _ in range(8):
+                if crc & 0x0001:
+                    crc >>= 1
+                    crc ^= 0xA001
+                else:
+                    crc >>= 1
+        return struct.pack('<H', crc)  
     def calculate_checksum(self, check_bytes):
         """
         计算校验码（不包含命令码03）：校验字节总和 → 取反+1（16位）
@@ -234,8 +245,8 @@ class BatteryRelayNode:
         try:
             # 使用锁保护串口访问
             with self.serial_lock:
-                crc = self.calculate_checksum(command_data)  # 复用校验函数
-                full_command = command_data + struct.pack('<H', crc)
+                crc = self.calculate_crc(command_data)
+                full_command = command_data + crc
                 self.ser.write(full_command)
                 rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
                 
@@ -286,15 +297,16 @@ class BatteryRelayNode:
         return False
 
     def read_relay_status(self):
-        """读取继电器状态"""
+        """读取继电器状态，失败时返回上一次保存的值"""
         command_data = bytes([self.relay_address, 0x01, 0x00, 0x00, 0x00, 0x08])
-        rospy.loginfo("发送继电器状态查询")
+        # 保存当前状态作为备选
+        last_known_state = self.current_relay_state
         
         try:
             # 使用锁保护串口访问
             with self.serial_lock:
-                crc = self.calculate_checksum(command_data)
-                full_command = command_data + struct.pack('<H', crc)
+                crc = self.calculate_crc(command_data)
+                full_command = command_data + crc
                 self.ser.write(full_command)
                 
                 time.sleep(0.01)
@@ -309,10 +321,15 @@ class BatteryRelayNode:
                         relay_status = (status_byte & 0x08) != 0
                         self.current_relay_state = relay_status
                         return relay_status
-            return None
+            
+            # 如果响应解析失败，返回上一次已知状态
+            rospy.logwarn("继电器状态解析失败，使用上一次已知状态")
+            return last_known_state
+        
         except Exception as e:
-            rospy.logerr(f"读取继电器状态错误: {e}")
-            return None
+            rospy.logerr(f"读取继电器状态错误: {e}，使用上一次已知状态")
+            # 发生异常时返回上一次已知状态
+            return last_known_state
 
     def temperature_based_control(self):
         """基于温度控制继电器，每种情况只触发一次，温度恢复后可再次触发"""
@@ -386,6 +403,9 @@ class BatteryRelayNode:
                 
                 # 处理继电器温度控制（最低优先级）
                 elif current_time - self.last_relay_check >= self.relay_check_interval:
+                    latest_relay_status = self.read_relay_status()
+                    # if latest_relay_status is None:
+                        # rospy.logwarn("读取继电器状态失败，当前旧状态")
                     self.temperature_based_control()
                     self.last_relay_check = current_time
                     
