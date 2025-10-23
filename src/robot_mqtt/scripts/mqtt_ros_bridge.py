@@ -8,6 +8,54 @@ import json
 import subprocess
 import threading
 import traceback
+import os  # 新增：用于适配不同系统的ping命令参数
+
+
+def check_network(broker, timeout=3):
+    """
+    检测网络是否连通且MQTT Broker可达
+    Args:
+        broker (str): MQTT Broker地址（IP或域名）
+        timeout (int): 超时时间（秒）
+    Returns:
+        bool: 网络可用且Broker可达返回True，否则False
+    """
+    # 适配Windows/Linux/macOS的ping命令参数
+    ping_param = "-n" if os.name == "nt" else "-c"  # Windows用-n，其他系统用-c
+    # 构造ping命令：只发1个包，缩短检测时间
+    ping_command = ["ping", ping_param, "1", "-W", str(timeout), broker]
+
+    try:
+        # 执行ping命令，不捕获输出（仅判断返回码）
+        subprocess.run(
+            ping_command,
+            stdout=subprocess.DEVNULL,  # 屏蔽标准输出
+            stderr=subprocess.DEVNULL,  # 屏蔽错误输出
+            check=True,  # 返回码非0则抛异常
+            timeout=timeout + 1  # 总超时时间（ping超时+命令执行缓冲）
+        )
+        return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # ping Broker失败，进一步判断是无网络还是Broker不可达
+        public_dns = ["8.8.8.8", "114.114.114.114"]  # 公共DNS（Google/国内）
+        for dns in public_dns:
+            try:
+                subprocess.run(
+                    ["ping", ping_param, "1", "-W", str(timeout), dns],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True,
+                    timeout=timeout + 1
+                )
+                # 能ping通DNS但ping不通Broker，说明基础网络通但Broker不可达
+                print(f"[网络检测] 基础网络连通（DNS:{dns}），但MQTT Broker({broker})不可达")
+                return False
+            except:
+                continue
+        
+        # 所有检测均失败，判定为无网络
+        return False
+
 
 class MQTTClient:
     def __init__(self, broker, port, user, password, topic_status, topic_cmd, topic_command, topic_result, client_id, ca_cert=None):
@@ -154,7 +202,7 @@ class MQTTClient:
                 
         except Exception as e:
             error_response = {
-                "id": command_id,
+                "id": command_id if 'command_id' in locals() else f"cmd_err_{int(time.time()*1000)}",
                 "command": command_str,
                 "success": False,
                 "error": str(e),
@@ -222,15 +270,21 @@ class MQTTClient:
     # Main Methods
     # =========================================================
     def connect(self):
-        """Connect to MQTT broker"""
+        """Connect to MQTT broker (新增网络检测与自动重试)"""
         keepalive = 60
-        print(f"\n⏳ 连接到MQTT服务器: {self.broker}:{self.port} (TLS加密)...")
+        # 1. 循环检测网络，直到网络可用且Broker可达
+        while not check_network(self.broker):
+            print(f"[网络检测] 网络不可用或Broker({self.broker})不可达，3秒后重试...")
+            time.sleep(3)  # 每3秒重试一次，避免资源占用
+        
+        # 2. 网络可用，尝试连接MQTT Broker
+        print(f"\n⏳ 网络已连通，尝试连接MQTT服务器: {self.broker}:{self.port} (TLS加密)...")
         
         try:
             # 设置用户名和密码
             self.client.username_pw_set(self.user, self.password)
 
-            # 启用自动重连
+            # 启用连接后自动重连（断网后会自动重试，间隔1-60秒）
             self.client.reconnect_delay_set(min_delay=1, max_delay=60)
         
             self.client.connect(self.broker, self.port, keepalive)
@@ -243,14 +297,17 @@ class MQTTClient:
             print("=" * 50)
             return True
         except Exception as e:
-            print(f"❌ 连接错误: {str(e)}")
-            return False
+            # 连接Broker失败，重试（依托外层网络检测确保网络可用）
+            print(f"❌ 连接Broker失败: {str(e)}，3秒后重试...")
+            time.sleep(3)
+            return self.connect()
 
     def start(self):
         """Start the MQTT client"""
-        # 启动ROS节点
+        # 启动ROS节点订阅与发布
         rospy.Subscriber("robot_state", String, self.ros_robot_state_callback)
         self.ros_cmd_pub = rospy.Publisher("robot_cmd", String, queue_size=10)
+        # 启动MQTT客户端循环
         self.client.loop_start()
         try:
             print("🚀 运行中 (CTRL+C 退出)...")
@@ -277,10 +334,12 @@ class MQTTClient:
         # 只发布到MQTT状态主题
         self.publish(self.topic_status, msg.data)
 
+
 if __name__ == "__main__":
-    # Configuration
+    # 初始化ROS节点
     rospy.init_node("mqtt_ros_bridge")  # 确保节点名称正确
 
+    # 从ROS参数服务器读取配置（支持launch文件传参）
     config = {
         "broker": rospy.get_param("~broker", "121.40.57.48"),
         "port": int(rospy.get_param("~port", 1883)),
@@ -295,7 +354,7 @@ if __name__ == "__main__":
     }
     
     rospy.loginfo(f"Final config: {config}")
-    # Create and start client
+    # 创建MQTT客户端并启动
     mqtt_client = MQTTClient(**config)
     if mqtt_client.connect():
         mqtt_client.start()

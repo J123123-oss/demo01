@@ -263,13 +263,18 @@ class BatteryRelayNode:
             rospy.logerr(f"继电器通信错误: {e}")
             return False
 
-    def enable_relay(self, enable=True):
+    def enable_relay(self, enable=True, current_temp=None):
         """开启或关闭继电器（仅限白天6:00-17:00可开启）"""
         # 时间限制：只有6:00-17:00允许开启
         if enable:
             now = datetime.datetime.now()
-            if not (6 <= now.hour < 17):
-                rospy.logwarn("当前时间不在允许开启继电器的时段（6:00-17:00），请求被拒绝")
+            # 检查是否在允许的常规时段（6:00-17:00）
+            in_regular_hours = 6 <= now.hour < 17
+            # 极端低温判断（当前温度＜-15℃时忽略时间限制）
+            is_extreme_low = current_temp is not None and current_temp < -15
+
+            if not in_regular_hours and not is_extreme_low:
+                rospy.logwarn("当前时间不在允许开启继电器的时段（6:00-17:00）且非极端低温（＜-15℃），请求被拒绝")
                 return False
 
         max_retries = 10
@@ -353,7 +358,7 @@ class BatteryRelayNode:
         # 低温触发：最低温度低于阈值且继电器关闭 → 开启
         elif min_temp <= self.temperature_threshold_low and not self.current_relay_state:
             rospy.loginfo(f"最低温度 {min_temp}°C 低于阈值 {self.temperature_threshold_low}°C，开启继电器")
-            if self.enable_relay(True):
+            if self.enable_relay(True, min_temp):
                 rospy.loginfo("继电器已开启")
             else:
                 rospy.logwarn("继电器开启失败")

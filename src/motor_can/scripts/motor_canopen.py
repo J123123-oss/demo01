@@ -227,7 +227,7 @@ class ServoDriveController:
             return False
         if new_state == self.current_status and new_state != "PISTON_OUT" and new_state != "PISTON_IN" and new_state != "STOP":
             return False  # 状态未改变
-        if self.current_status in ["FORWARD", "BACKWARD"] and new_state == "CHARGE_OUT" or new_state == "RETURN_DOCK":
+        if self.current_status in ["FORWARD", "BACKWARD"] and ( new_state == "CHARGE_OUT" or new_state == "RETURN_DOCK" ):
             return False  # 防止运行时异常状态干扰
             
         # 检查是否从START切换到其他模式

@@ -3,7 +3,7 @@
 
 CHECK_INTERVAL=30  # 主检测间隔（秒）
 TARGET_IP="121.40.57.48"
-WIFI_GATEWAY="192.168.200.1"  # WiFi网关
+WIFI_GATEWAY="192.168.12.1"  # WiFi网关
 WIFI_INTERFACE="wlan0"        # WiFi接口
 CELLULAR_INTERFACE="ppp0"     # 4G接口
 WIFI_RECONNECT_CHECK=1        # 4G状态下检测WiFi恢复（1=开启）
