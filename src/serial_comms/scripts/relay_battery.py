@@ -323,7 +323,7 @@ class BatteryRelayNode:
                     byte_count = response[2]
                     if byte_count >= 1:
                         status_byte = response[3]
-                        relay_status = (status_byte & 0x08) != 0
+                        relay_status = (status_byte & 0x01) != 0
                         self.current_relay_state = relay_status
                         return relay_status
             
