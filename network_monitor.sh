@@ -1,7 +1,7 @@
 #!/bin/bash
 # conservative_network.sh
 
-CHECK_INTERVAL=30  # 主检测间隔（秒）
+CHECK_INTERVAL=600  # 主检测间隔（秒）
 TARGET_IP="121.40.57.48"
 WIFI_GATEWAY="192.168.12.1"  # WiFi网关
 WIFI_INTERFACE="wlan0"        # WiFi接口

@@ -1416,9 +1416,7 @@ class ServoDriveController:
                         rospy.loginfo(f"电机 {motor_id} 无故障")
                         self.motor_driver = True
                     return fault_code
-        if self.current_status != "STOP":
-            self.motor_driver = False
-            rospy.logwarn(f"读取电机 {motor_id} 故障码超时")
+        rospy.logwarn(f"读取电机 {motor_id} 故障码超时")
         return None
 
     def clear_fault(self, motor_id):
