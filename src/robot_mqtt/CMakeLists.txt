@@ -162,7 +162,6 @@ include_directories(
 # 安装Python脚本
 catkin_install_python(PROGRAMS
   scripts/mqtt_ros_bridge.py
-  scripts/mqtt_old.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

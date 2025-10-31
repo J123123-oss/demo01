@@ -54,7 +54,7 @@ add_message_files(
   INSPVAE.msg
   Sensors.msg
   BatteryStatus.msg  # 自定义电池状态消息
-
+  Environment.msg    # 自定义环境数据消息
   # Message2.msg
 )
 
@@ -123,6 +123,12 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
 )
+add_executable(weather_station src/weather_station.cpp)
+target_link_libraries(weather_station
+  ${catkin_LIBRARIES}
+  modbus  # 链接modbus库
+)
+add_dependencies(weather_station ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}

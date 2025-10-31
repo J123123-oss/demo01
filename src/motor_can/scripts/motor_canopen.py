@@ -375,9 +375,9 @@ class ServoDriveController:
             # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
             if self.velocity_publish_count >= self.velocity_publish_interval:
                 # 获取新的速度数据
-                self.last_velocity_up = self.get_actual_velocity(3)
+                # self.last_velocity_up = self.get_actual_velocity(3)
                 self.last_velocity_low = self.get_actual_velocity(2)
-                self.last_velocity_brush = self.get_actual_velocity(4)
+                # self.last_velocity_brush = self.get_actual_velocity(4)
                 self.velocity_publish_count = 0  # 重置计数器
             
             # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
@@ -620,8 +620,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -1441,7 +1441,7 @@ class ServoDriveController:
     def check_and_clear_faults(self):
         """定期检查并清除电机故障"""
         # for motor_id in [2, 3, 4]:  # 检查所有电机
-        for motor_id in [4]:  # 检查所有电机
+        for motor_id in [2]:  # 检查所有电机
             # 1. 检查故障码
             fault_code = self.read_fault_code(motor_id)
             actual_velocity = self.get_actual_velocity(motor_id)
@@ -1666,7 +1666,7 @@ def main():
     rospy.init_node("motor_canopen_node")
     controller = ServoDriveController()
     # controller.stop_imu()
-    controller.start_imu()
+    # controller.start_imu()
     config = controller.load_config()
     if not config or "motors" not in config or not config["motors"]:
         rospy.logerr("未找到有效配置，请检查配置文件")

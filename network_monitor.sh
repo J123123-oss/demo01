@@ -3,13 +3,15 @@
 
 CHECK_INTERVAL=600  # 主检测间隔（秒）
 TARGET_IP="121.40.57.48"
-WIFI_GATEWAY="192.168.12.1"  # WiFi网关
+WIFI_GATEWAY="192.168.200.1"  # WiFi网关
 WIFI_INTERFACE="wlan0"        # WiFi接口
 CELLULAR_INTERFACE="ppp0"     # 4G接口
 WIFI_RECONNECT_CHECK=1        # 4G状态下检测WiFi恢复（1=开启）
 # 新增：WiFi热点信息（替换为你的WiFi名称和密码）
-WIFI_SSID="磅房1"       # 例如 "MyHomeWiFi"
-WIFI_PASSWORD="88888888"   # 例如 "12345678"
+# WIFI_SSID="磅房1"       # 例如 "MyHomeWiFi"
+WIFI_SSID="GiiFen-5G"       # 例如 "MyHomeWiFi"
+# WIFI_PASSWORD="88888888"   # 例如 "12345678"
+WIFI_PASSWORD="giifen666666"   # 例如 "12345678"
 
 echo "保守网络切换脚本启动..."
 echo "检测间隔: ${CHECK_INTERVAL}秒 | 目标IP: ${TARGET_IP}"

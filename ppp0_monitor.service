@@ -7,8 +7,8 @@ ExecStartPre=/bin/sleep 60
 ExecStart=/home/orangepi/demo01/ppp0_monitor.sh
 Restart=always
 User=orangepi
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
