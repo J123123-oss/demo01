@@ -15,7 +15,7 @@ class WeatherStationNode:
         # Modbus RTU配置（重点：波特率设为4800）
         self.client = ModbusSerialClient(
             method='rtu',
-            port='/dev/ttyUSB14',  # 串口设备，根据实际情况修改
+            port='/dev/battery-weather',  # 串口设备，根据实际情况修改
             baudrate=9600,        # 波特率：4800（按需求设置）
             parity='N',           # 校验位：无校验
             stopbits=1,           # 停止位：1

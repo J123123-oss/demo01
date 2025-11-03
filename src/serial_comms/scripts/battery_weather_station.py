@@ -35,9 +35,9 @@ class BatteryWeatherStationNode:
         
         # -------------------------- 2. 气象站Modbus参数（新增）--------------------------
         # 气象站ROS参数（支持外部配置）
-        self.weather_port = rospy.get_param('~weather_station_port', '/dev/ttyUSB14')
+        self.weather_port = rospy.get_param('~weather_station_port', '/dev/battery-weather')
         self.weather_baudrate = rospy.get_param('~weather_station_baudrate', 9600)
-        self.weather_slave_id = rospy.get_param('~weather_station_slave_id', 1)
+        self.weather_slave_id = rospy.get_param('~weather_station_slave_id', 9)
         self.weather_check_interval = rospy.get_param('~weather_station_check_interval', 6.0)  # 气象站轮询间隔
         
         # 气象站寄存器地址（十进制，与原气象站代码一致）
@@ -52,7 +52,7 @@ class BatteryWeatherStationNode:
         self.serial_lock = threading.Lock()
         self.ser = None
         self.init_battery_serial(
-            port=rospy.get_param('~battery_serial_port', '/dev/ttyUSB14'),
+            port=rospy.get_param('~battery_serial_port', '/dev/battery-weather'),
             baudrate=rospy.get_param('~battery_baudrate', 9600)
         )
         if not self.ser:

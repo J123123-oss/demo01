@@ -23,7 +23,7 @@ class BatteryAndIMUNode:
         self.imu_buffer = bytearray()
         
         # 获取串口参数
-        port = rospy.get_param('~serial_port', '/dev/Battery-Relay')
+        port = rospy.get_param('~serial_port', '/dev/ttyACM0')
         baudrate = rospy.get_param('~baudrate', 115200)
         
         # 初始化串口

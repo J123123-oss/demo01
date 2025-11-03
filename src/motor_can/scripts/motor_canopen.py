@@ -376,7 +376,7 @@ class ServoDriveController:
             if self.velocity_publish_count >= self.velocity_publish_interval:
                 # 获取新的速度数据
                 # self.last_velocity_up = self.get_actual_velocity(3)
-                self.last_velocity_low = self.get_actual_velocity(2)
+                self.last_velocity_low = self.get_actual_velocity(1)
                 # self.last_velocity_brush = self.get_actual_velocity(4)
                 self.velocity_publish_count = 0  # 重置计数器
             
@@ -1441,7 +1441,7 @@ class ServoDriveController:
     def check_and_clear_faults(self):
         """定期检查并清除电机故障"""
         # for motor_id in [2, 3, 4]:  # 检查所有电机
-        for motor_id in [2]:  # 检查所有电机
+        for motor_id in [1]:  # 检查所有电机
             # 1. 检查故障码
             fault_code = self.read_fault_code(motor_id)
             actual_velocity = self.get_actual_velocity(motor_id)

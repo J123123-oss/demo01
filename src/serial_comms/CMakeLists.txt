@@ -177,6 +177,8 @@ catkin_install_python(PROGRAMS
   scripts/battery_imu_node.py
   scripts/motor_gpio.py
   scripts/proximity_can.py
+  scripts/imu_parser_node.py
+  scripts/battery_weather_station.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 ## Mark executables for installation
