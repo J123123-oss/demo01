@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 ExecStartPre=/bin/sleep 60
-ExecStart=/home/orangepi/demo01/ppp0_monitor.sh
+ExecStart=/home/ubuntu/demo01/ppp0_monitor.sh
 Restart=always
-User=orangepi
+User=root
 StandardOutput=journal
 StandardError=journal
 

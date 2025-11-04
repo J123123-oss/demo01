@@ -29,8 +29,8 @@
         <!-- <param name="~relay_check_interval" value="11"/> -->
     <!-- </node> -->
     <!-- IMU单独节点 -->
-    <!-- <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/> -->
-    <!-- <node pkg="serial_comms" type="battery_weather_station.py" name="battery_weather_station" output="screen"/> -->
+    <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
+    <node pkg="serial_comms" type="battery_weather_station.py" name="battery_weather_station" output="screen"/>
     <!-- 接近开关使用CAN协议 -->
     <!-- <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" /> -->
     <!-- 控制电缸节点 -->
