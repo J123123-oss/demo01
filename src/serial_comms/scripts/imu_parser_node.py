@@ -19,14 +19,14 @@ class IMUParser:
         self.device_addr = 0x50
         self.rx_frame_length = 7
         self.ser = None
-        self.reconnect_interval = 1.0  # 重连间隔
+        self.reconnect_interval = 2.0  # 重连间隔
         self.last_reconnect_time = 0
 
         self.start_srv = rospy.Service('~start_imu', std_srvs.srv.Trigger, self.handle_start)
         self.stop_srv = rospy.Service('~stop_imu', std_srvs.srv.Trigger, self.handle_stop)
         
-        # 初始化串口
-        self.init_serial()
+        # 等待初始化串口
+        self.init_serial_with_retry()
 
         # 发布IMU数据
         self.imu_pub = rospy.Publisher('/inspvae_data', INSPVAE, queue_size=1)
@@ -35,10 +35,12 @@ class IMUParser:
         self.timer = None
 
     def init_serial(self):
-        """初始化/重新初始化串口连接"""
+        """单次初始化/重新初始化串口连接"""
         try:
+            # 关闭可能存在的旧连接
             if self.ser and self.ser.is_open:
                 self.ser.close()
+            # 尝试建立新连接
             self.ser = serial.Serial(
                 port=self.port,
                 baudrate=self.baudrate,
@@ -51,14 +53,26 @@ class IMUParser:
             return True
         except Exception as e:
             rospy.logerr(f"Serial connection failed: {str(e)}")
+            self.ser = None  # 确保连接失败时ser为None
             return False
 
+    def init_serial_with_retry(self):
+        """初始化阶段循环重试，直到串口连接成功或节点关闭"""
+        rospy.loginfo(f"尝试连接串口 {self.port}...")
+        while not rospy.is_shutdown() and not self.init_serial():
+            rospy.logwarn(f"IMU串口连接失败，{self.reconnect_interval}秒后重试...")
+            rospy.sleep(self.reconnect_interval)
+        if rospy.is_shutdown():
+            rospy.loginfo("IMU节点已关闭，停止串口初始化")
+
     def safe_serial_write(self, data):
-        """安全的串口数据写入"""
+        """安全的串口数据写入，失败时触发重连"""
         try:
             if self.ser and self.ser.is_open:
                 self.ser.write(data)
                 return True
+            # 连接未就绪时尝试重连
+            self.init_serial()
             return False
         except Exception as e:
             rospy.logwarn(f"Serial write failed: {str(e)}")
@@ -104,6 +118,7 @@ class IMUParser:
                 self.timer.shutdown()
                 self.timer = None
             rospy.loginfo("IMU工作已停止(imu_parser_node)")
+
     def handle_start(self, req):
         self.start()
         return std_srvs.srv.TriggerResponse(success=True, message="IMU started")
@@ -150,19 +165,20 @@ class IMUParser:
                         if parsed:
                             self.publish_inspvae_data(parsed)
                 
-                # 检查串口连接状态
+                # 运行中检查串口连接状态，触发重连
                 if not self.ser or not self.ser.is_open:
-                    if rospy.Time.now().to_sec() - self.last_reconnect_time > self.reconnect_interval:
+                    current_time = rospy.Time.now().to_sec()
+                    if current_time - self.last_reconnect_time > self.reconnect_interval:
                         if self.init_serial():
-                            self.last_reconnect_time = rospy.Time.now().to_sec()
+                            self.last_reconnect_time = current_time
                         else:
-                            rospy.sleep(1)
+                            rospy.sleep(0.1)  # 短等待避免CPU占用过高
                 
                 rospy.sleep(0.001)
 
             except Exception as e:
                 rospy.logerr(f"Main loop error: {str(e)}")
-                self.init_serial()
+                self.init_serial()  # 发生异常时尝试重连
                 rospy.sleep(1)
 
     def publish_inspvae_data(self, angles):

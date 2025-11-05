@@ -44,9 +44,11 @@ class BatteryRelayNode:
         # 初始化串口
         self.ser = None
         self.init_serial(port, baudrate)
-        if not self.ser:
-            rospy.signal_shutdown("串口初始化失败")
-            return
+        # 如果失败，循环调用reinit_serial重试
+        while not rospy.is_shutdown() and not self.ser:
+            rospy.logwarn("relay_battery串口初始化失败，重试...")
+            self.reinit_serial()  # 调用重连方法
+            rospy.sleep(3)  # 间隔3秒重试，避免频繁尝试
 
         # 初始化继电器状态为实际状态（加入循环重试机制）
         init_max_retries = 5  # 最大重试次数

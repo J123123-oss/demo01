@@ -1,18 +1,20 @@
 [Unit]
 Description=Network Monitor Service (Delayed 1 minute)
 After=network.target
- # 确保网络相关服务启动后再执行（可选，增强稳定性）
 Wants=network.target
 
 [Service]
-# ExecStartPre=/bin/sleep 50
-  # 延时60秒（关键：开机后等待1分钟）
-ExecStart=/home/orangepi/demo01/network_monitor.sh >> /home/orangepi/demo01/network_monitor.log 2>&1
-  # 脚本的绝对路径
+# 延时60秒启动（确保系统初始化完成）
+ExecStartPre=/bin/sleep 60
+# 执行脚本（不在这里写重定向）
+ExecStart=/home/orangepi/demo01/network_monitor.sh
 User=root
-  # 必须root权限（设置系统时间需要）
-RemainAfterExit=yes
-  # 执行完毕后仍标记为"运行中"（不影响，可选）
+# 标准输出和错误输出重定向到日志文件
+StandardOutput=append:/home/orangepi/demo01/network_monitor.log
+StandardError=append:/home/orangepi/demo01/network_monitor.log
+# 脚本退出后自动重启（增强稳定性）
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

@@ -478,7 +478,7 @@ class ServoDriveController:
             try:
                 return can.interface.Bus(channel=self.channel, interface=self.interface)
             except (can.CanError, OSError) as e:
-                rospy.logerr(f"CAN连接失败: {e}，3秒后重试...")
+                rospy.logerr(f"motor_canopen CAN连接失败: {e}，3秒后重试...")
                 time.sleep(3)
 
     def reconnect_can_bus(self):

@@ -18,9 +18,11 @@ class DigitalInputReader:
         self.baudrate = rospy.get_param('~baudrate', 1000000)  # 默认1Mbps(手册值0x0b)
         self.request_baudrate = rospy.get_param('~request_baudrate', False)  # 是否设置波特率，设置1次，断电5秒后生效
         
-        # CAN初始化
+        # CAN初始化 - 增加重连循环
         self.bus = None
-        self._init_can()
+        while not rospy.is_shutdown() and not self._init_can():
+            rospy.logwarn(f"proximity_can等待{self.can_interface}接口可用，5秒后重试...")
+            rospy.sleep(5)  # 等待5秒后重试
 
         # 尝试设置波特率为1M(若需要)
         if self.request_baudrate:
@@ -64,9 +66,11 @@ class DigitalInputReader:
                 can_filters=filters
             )
             rospy.loginfo(f"Successfully connected to CAN interface {self.can_interface} at {self.baudrate} bps")
+            return True  # 初始化成功
         except Exception as e:
             rospy.logerr(f"CAN interface error: {str(e)}")
-            rospy.signal_shutdown("CAN initialization failed")
+            self.bus = None
+            return False  # 初始化失败
 
     def reconnect_can_bus(self):
         """重连CAN总线"""
