@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PPP_IFACE="ppp0:"
+PPP_IFACE="ppp0"
 PING_TARGET="121.40.57.48"
 CHECK_INTERVAL=300
 MAX_FAILURES=3
@@ -42,7 +42,7 @@ while true; do
                     sleep 1
                     timeout=$((timeout-1))
                 done
-                
+                reboot
                 echo "$(date): 拨号失败，10秒后再次尝试..."
                 sleep 10
             done

@@ -9,5 +9,5 @@ while ! ping -c 1 -W 2 $TARGET_IP > /dev/null 2>&1; do
     sleep 1
 done
 echo "已成功ping通 $TARGET_IP"
-source /home/orangepi/demo01/devel/setup.bash && roslaunch motor_can run.launch
+source /home/orangepi/demo01/devel/setup.bash && roslaunch motor_can run.launch >> /home/orangepi/demo01/run.log
 

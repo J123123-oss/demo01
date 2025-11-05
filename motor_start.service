@@ -11,9 +11,9 @@ StandardError=journal
 # 脚本路径和解释器
 Restart=on-failure
 # 如果脚本崩溃，自动重启
-User=orangepi  
+User=ubuntu  
 # 服务运行的用户（根据需要调整）
-#WorkingDirectory=/home/ubuntu  
+#WorkingDirectory=/home/orangepi  
 # 设置工作目录
 #Type=forking
 #RemainAfterExit=yes
