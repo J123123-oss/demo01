@@ -12,7 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   sensor_msgs
   std_msgs
-  robot_localization
+  # robot_localization
 )
 
 ## System dependencies are found with CMake's conventions
