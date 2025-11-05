@@ -1,5 +1,7 @@
 #!/bin/bash
-
+export LC_ALL=zh_CN.UTF-8
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN.UTF-8
 # 配置参数
 INTERFACE="ppp0"          # 要检测的接口
 CHECK_INTERVAL=300         # 检测间隔（秒）
