@@ -1,5 +1,7 @@
 #!/bin/bash
-# conservative_network.sh（优先4G版本）
+export LC_ALL=zh_CN.UTF-8
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN.UTF-8
 
 CHECK_INTERVAL=600  # 主检测间隔（秒）
 TARGET_IP="121.40.57.48"

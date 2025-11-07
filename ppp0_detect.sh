@@ -2,6 +2,7 @@
 export LC_ALL=zh_CN.UTF-8
 export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN.UTF-8
+
 # 配置参数
 INTERFACE="ppp0"          # 要检测的接口
 CHECK_INTERVAL=300         # 检测间隔（秒）
@@ -26,7 +27,7 @@ while true; do
         # 检查是否达到超时阈值
         if [ $fail_count -ge $max_fail ]; then
             # 记录重启日志
-            echo "$(date +'%Y-%m-%d %H:%M:%S') - $INTERFACE 已掉线超过 $TIMEOUT 秒，执行重启..."
+            echo "$(date +'%Y-%m-%d %H:%M:%S') - $INTERFACE 已掉线超过 $TIMEOUT 秒，执行重启..." >> /home/orangepi/demo01/ppp0_log.log
             sleep 1
             reboot
         else
@@ -34,7 +35,9 @@ while true; do
             pkill -f pppd > /dev/null 2>&1
             pkill -f wvdial > /dev/null 2>&1
             sleep 3
-            sudo wvdial >> /home/orangepi/demo01/ppp0_log.log 2>&1
+            sudo wvdial &
+            echo "reconnect wvdial..." >> /home/orangepi/demo01/ppp0_log.log 2>&1
+            echo "sleep 30..." >> /home/orangepi/demo01/ppp0_log.log
             sleep 30
             if ip addr show "$INTERFACE" | grep -q "inet "; then
                 echo "$(date +'%Y-%m-%d %H:%M:%S') - 重新拨号成功！" >> /home/orangepi/demo01/ppp0_log.log
