@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   message_generation
+  serial
 )
 
 ## System dependencies are found with CMake's conventions
@@ -55,6 +56,7 @@ add_message_files(
   Sensors.msg
   BatteryStatus.msg  # 自定义电池状态消息
   Environment.msg    # 自定义环境数据消息
+  WTRTK.msg
   # Message2.msg
 )
 
@@ -130,6 +132,14 @@ target_link_libraries(weather_station
 )
 add_dependencies(weather_station ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
+
+add_executable(wtrtk_serial_driver src/wtrtk_serial_driver.cpp)
+add_dependencies(wtrtk_serial_driver ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(wtrtk_serial_driver
+  ${catkin_LIBRARIES}
+  serial
+)
+link_directories(/opt/ros/noetic/lib)
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/serial_comms.cpp

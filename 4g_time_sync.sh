@@ -23,14 +23,25 @@ screen -L -Logfile /tmp/4g_time.log -d -m -S 4g_time $SERIAL_DEV $BAUD_RATE \
 
 # 提取最新响应
 RAW_RESPONSE=$(grep "+QLTS:" /tmp/4g_time.log | tail -1)
-
 echo "原始响应: $RAW_RESPONSE"
+
+# 检查原始响应是否为空
+if [ -z "$RAW_RESPONSE" ]; then
+    echo "错误：未获取到有效响应数据，终止同步操作"
+    exit 1
+fi
 
 # 提取时间数据
 TIME_DATA=$(echo "$RAW_RESPONSE" | grep -o '"[^"]*"')
 TIME_DATA=${TIME_DATA//\"/}
 
 echo "提取的时间数据: $TIME_DATA"
+
+# 检查时间数据是否为空
+if [ -z "$TIME_DATA" ]; then
+    echo "错误：未提取到有效时间数据，终止同步操作"
+    exit 1
+fi
 
 # 解析时间数据
 IFS=',' read -r DATE TIME_PART DST <<< "$TIME_DATA"

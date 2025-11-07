@@ -6,8 +6,8 @@ motors:
   #   acceleration: 500 # 加速度 (脉冲/s²)
   #   deceleration: 1500 # 减速度 (脉冲/s²)
 
-  - id: 1      # 远离工控机电机ID
-    velocity: 7352  # 目标速度
+  - id: 2      # 远离工控机电机ID
+    velocity: 0  # 目标速度
     acceleration: 500 # 加速度
     deceleration: 1500 # 减速度
   
