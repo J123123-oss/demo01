@@ -34,7 +34,7 @@ while true; do
             pkill -f pppd > /dev/null 2>&1
             pkill -f wvdial > /dev/null 2>&1
             sleep 3
-            sudo wvdial >> /home/orangepi/demo01/ppp0_log.log 2>&1
+            sudo wvdial >> /home/orangepi/demo01/ppp0_log.log 2>&1 &
             sleep 30
             if ip addr show "$INTERFACE" | grep -q "inet "; then
                 echo "$(date +'%Y-%m-%d %H:%M:%S') - 重新拨号成功！" >> /home/orangepi/demo01/ppp0_log.log
