@@ -1,0 +1,5 @@
+uint8 sensitivity  # 灵敏度值 默认0x11，改小增加灵敏度
+---
+# 响应消息
+bool success
+string message
