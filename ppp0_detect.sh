@@ -1,4 +1,7 @@
 #!/bin/bash
+export LC_ALL=zh_CN.UTF-8
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN.UTF-8
 
 # 配置参数
 INTERFACE="ppp0"          # 要检测的接口
@@ -34,8 +37,8 @@ while true; do
             sleep 3
             sudo wvdial &
             echo "reconnect wvdial..." >> /home/orangepi/demo01/ppp0_log.log 2>&1
-            sleep 30
             echo "sleep 30..." >> /home/orangepi/demo01/ppp0_log.log
+            sleep 30
             if ip addr show "$INTERFACE" | grep -q "inet "; then
                 echo "$(date +'%Y-%m-%d %H:%M:%S') - 重新拨号成功！" >> /home/orangepi/demo01/ppp0_log.log
                 fail_count=0  # 重置失败计数
