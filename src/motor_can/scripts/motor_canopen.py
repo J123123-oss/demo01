@@ -33,11 +33,11 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 350
+        self.motor_base = 35000
         self.base_speed = 17000   #设置后退基础速度值  * 0.8 > * 1
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 25840  #(380*rate)  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 2584000  #(380*rate)  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -386,7 +386,7 @@ class ServoDriveController:
             if self.velocity_publish_count >= self.velocity_publish_interval:
                 # 获取新的速度数据
                 # self.last_velocity_up = self.get_actual_velocity(3)
-                self.last_velocity_low = self.get_actual_velocity(2)
+                self.last_velocity_low = self.get_actual_velocity(1)
                 # self.last_velocity_brush = self.get_actual_velocity(4)
                 self.velocity_publish_count = 0  # 重置计数器
             
@@ -624,9 +624,11 @@ class ServoDriveController:
 
     def shutdown(self):
         rospy.loginfo("正在关闭电机控制器...")
+        self.set_target_velocity(1, 0)
         self.set_target_velocity(2, 0)
         self.set_target_velocity(3, 0)
         self.set_target_velocity(4, 0)
+        self.disable_drive(1)
         self.disable_drive(2)
         self.disable_drive(3)
         self.disable_drive(4)
@@ -1059,7 +1061,7 @@ class ServoDriveController:
                 # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
-                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1130,7 +1132,7 @@ class ServoDriveController:
                     rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}")
                     rospy.loginfo(f"后退上轮速度: {left_speed}, 下轮速度: {right_speed}")
                     # 设置速度
-                    self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(1, left_speed)
                     self.set_target_velocity(2, right_speed)
                     self.set_target_velocity(4, brush_speed)
                 # 更新最后速度记录
@@ -1164,7 +1166,7 @@ class ServoDriveController:
                     rospy.loginfo(f"后退完毕上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
                     # 设置速度
-                    self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(1, left_speed)
                     self.set_target_velocity(2, right_speed)
                     self.set_target_velocity(4, brush_speed)
                 
@@ -1202,7 +1204,7 @@ class ServoDriveController:
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1220,7 +1222,7 @@ class ServoDriveController:
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1238,12 +1240,12 @@ class ServoDriveController:
                 self.last_right_speed != 0 or
                 self.last_brush_speed != 0):
                 self.has_reverse_counter = 0  # 重置后退计数器
-
                 self.set_target_velocity(2, 0)
-                self.set_target_velocity(3, 0)
+                self.set_target_velocity(1, 0)
                 self.set_target_velocity(4, 0)
 
                 # 停止使能电机，下次需使能
+                self.disable_drive(1)
                 self.disable_drive(2)
                 self.disable_drive(3)
                 self.disable_drive(4)
@@ -1273,7 +1275,7 @@ class ServoDriveController:
                 # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
-                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1290,7 +1292,7 @@ class ServoDriveController:
                 # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
-                self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1455,7 +1457,7 @@ class ServoDriveController:
     def check_and_clear_faults(self):
         """定期检查并清除电机故障"""
         # for motor_id in [2, 3, 4]:  # 检查所有电机
-        for motor_id in [2]:  # 检查所有电机
+        for motor_id in [1]:  # 检查所有电机
             # 1. 检查故障码
             fault_code = self.read_fault_code(motor_id)
             actual_velocity = self.get_actual_velocity(motor_id)
