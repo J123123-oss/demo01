@@ -1,0 +1,12 @@
+[Unit]
+Description=Detect 4G Connection
+After=network.target
+
+[Service]
+ExecStartPre=/bin/sleep 60
+ExecStart=/home/orangepi/demo01/ppp0_detect.sh
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

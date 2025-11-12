@@ -13,7 +13,7 @@ class WTRTKSerialDriver:
         rospy.init_node('wtrtk_serial_driver', anonymous=True)
         
         # 读取参数（默认端口和波特率）
-        self.port = rospy.get_param('~port', '/dev/ttyUSB0')
+        self.port = rospy.get_param('~port', '/dev/WTRTK')
         self.baud_rate = rospy.get_param('~baud', 460800)
         
         # 初始化串口
@@ -54,7 +54,34 @@ class WTRTKSerialDriver:
         except Exception as e:
             rospy.logerr(f"Failed to open serial port {self.port}: {str(e)}")
             return False
-
+    def dms_to_decimal(self, dms_str, is_latitude=True):
+        """
+        将度分格式（DDMM.MMMMM）转换为十进制格式（DD.DDDDD°）
+        :param dms_str: 度分字符串（如"3019.26385001"表示30°19.26385001'）
+        :param is_latitude: 是否为纬度（用于校验范围）
+        :return: 十进制角度（float），转换失败返回None
+        """
+        try:
+            dms = float(dms_str)
+            # 提取度（整数部分）和分（小数部分）
+            degrees = int(dms // 100)  # 3019.26385 → 30（3019//100=30）
+            minutes = dms % 100         # 3019.26385 → 19.26385（3019%100=19.26385）
+            # 转换公式：十进制 = 度 + 分/60
+            decimal = degrees + minutes / 60.0
+            
+            # 校验范围（纬度：-90~90，经度：-180~180）
+            if is_latitude:
+                if not (-90 <= decimal <= 90):
+                    rospy.logwarn(f"纬度超出范围: {decimal}")
+                    return None
+            else:
+                if not (-180 <= decimal <= 180):
+                    rospy.logwarn(f"经度超出范围: {decimal}")
+                    return None
+            return decimal
+        except (ValueError, TypeError) as e:
+            rospy.logwarn(f"经纬度转换失败: {dms_str}, 错误: {e}")
+            return None
     def parse_wtrtk(self, frame):
         """解析$WTRTK帧（25个字段，不含帧头和校验位）"""
         if not frame.startswith("$WTRTK"):
@@ -101,10 +128,17 @@ class WTRTKSerialDriver:
             msg.temperature = float(fields[15]) # 温度
             msg.base_distance = int(fields[16]) # 基站距离
             msg.ins_flag = int(fields[17])      # 惯导标志
-            msg.ins_latitude = fields[18]       # 惯导纬度
-            msg.lat_flag = fields[19]           # 纬度标志
-            msg.ins_longitude = fields[20]      # 惯导经度
-            msg.lon_flag = fields[21]           # 经度标志
+            # 经纬度转换（核心修改）
+            # 1. 纬度转换（度分→十进制）
+            lat_dms = fields[18]  # 度分格式："3019.26385001"
+            msg.ins_latitude = self.dms_to_decimal(lat_dms, is_latitude=True)
+            # 2. 纬度标志（N/S）
+            msg.lat_flag = fields[19]
+            # 3. 经度转换（度分→十进制）
+            lon_dms = fields[20]  # 度分格式："12004.23373081"
+            msg.ins_longitude = self.dms_to_decimal(lon_dms, is_latitude=False)
+            # 4. 经度标志（E/W）
+            msg.lon_flag = fields[21]
             msg.ins_speed = float(fields[22])   # 惯导地速
             msg.ins_heading = float(fields[23]) # 惯导航向角
             msg.ins_altitude = float(fields[24])# 惯导高度

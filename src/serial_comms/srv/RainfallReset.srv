@@ -1,0 +1,5 @@
+---
+# 响应消息
+bool success
+string message
+float32 current_rainfall  # 清零后的当前雨量值（用于验证）

@@ -18,9 +18,9 @@ float64 battery_voltage # 电池电压:V
 float64 temperature     # 温度:℃
 int32 base_distance     # 基站距离:米
 int32 ins_flag          # 惯导标志:0:初始化,1:初步,2:完全
-string ins_latitude     # 惯导纬度:度分
+float64 ins_latitude     # 惯导纬度:度分>>十进制使用
 string lat_flag         # 纬度标志:N/S
-string ins_longitude    # 惯导经度:度分
+float64 ins_longitude    # 惯导经度:度分>>十进制使用
 string lon_flag         # 经度标志:E/W
 float64 ins_speed       # 惯导地速:km/h
 float64 ins_heading     # 惯导航向角:度

@@ -10,6 +10,8 @@ from std_srvs.srv import Trigger, TriggerResponse
 import threading
 from pymodbus.client import ModbusSerialClient  # 新增Modbus客户端
 from pymodbus.exceptions import ModbusException  # 新增Modbus异常处理
+from serial_comms.srv import RainfallReset, RainfallResetResponse, RainfallResetRequest
+from serial_comms.srv import RainfallSetSensitivity, RainfallSetSensitivityResponse, RainfallSetSensitivityRequest
 
 # 状态常量（删除继电器相关状态，仅保留电池状态）
 STATE_READY = 0
@@ -46,7 +48,22 @@ class BatteryWeatherStationNode:
         self.REG_LUX_HIGH = 510     # 光照高16位
         self.REG_LUX_LOW = 511      # 光照低16位
         self.REG_RAINFALL = 513     # 雨量（×10）
+        self.RAINFALL_RESET_REG = 0x6002      # 清零寄存器
+        self.RAINFALL_SENSITIVITY_REG = 0x6003 # 灵敏度寄存器
+        # 固定值定义
+        self.RESET_VALUE = 0x005A
+        # 创建ROS服务
+        self.rainfall_reset_service = rospy.Service(
+            'rainfall_reset', 
+            RainfallReset, 
+            self.handle_rainfall_reset
+        )
         
+        self.rainfall_sensitivity_service = rospy.Service(
+            'rainfall_set_sensitivity',
+            RainfallSetSensitivity,
+            self.handle_set_sensitivity
+        )
         # -------------------------- 3. 硬件初始化（电池串口 + 气象站Modbus）--------------------------
         # 电池串口初始化（保留原逻辑，添加锁）
         self.serial_lock = threading.Lock()
@@ -56,8 +73,9 @@ class BatteryWeatherStationNode:
             baudrate=rospy.get_param('~battery_baudrate', 9600)
         )
         if not self.ser:
-            rospy.signal_shutdown("电池串口初始化失败")
-            return
+            self.reinit_battery_serial()
+            # rospy.signal_shutdown("电池串口初始化失败")
+            # return
         
         # 气象站Modbus客户端初始化（新增）
         self.weather_client = None
@@ -84,7 +102,85 @@ class BatteryWeatherStationNode:
         self.current_state = STATE_READY  # 初始状态为就绪
         
         rospy.loginfo("电池-气象站集成节点初始化完成")
+    def handle_rainfall_reset(self, req):
+        """处理雨量清零服务请求"""
+        rospy.loginfo("收到雨量清零服务请求")
+        
+        response = RainfallResetResponse()
+        
+        try:
+            # 执行清零操作
+            success = self.write_weather_register(self.RAINFALL_RESET_REG, self.RESET_VALUE)
+            
+            if success:
+                # 等待设备处理
+                rospy.sleep(0.5)
+                
+                # 验证清零结果
+                current_rainfall = self.get_current_rainfall()
+                
+                if current_rainfall is not None:
+                    response.success = True
+                    response.message = f"雨量清零成功，当前值: {current_rainfall} mm"
+                    response.current_rainfall = current_rainfall
+                    
+                    if current_rainfall == 0:
+                        response.message += " (验证通过)"
+                    else:
+                        response.message += " (但值不为0，请检查设备)"
+                        rospy.logwarn("雨量清零后验证失败")
+                        
+                    rospy.loginfo(response.message)
+                else:
+                    response.success = False
+                    response.message = "雨量清零执行但验证读取失败"
+                    response.current_rainfall = -1.0
+                    rospy.logerr(response.message)
+            else:
+                response.success = False
+                response.message = "雨量清零指令发送失败"
+                response.current_rainfall = -1.0
+                rospy.logerr(response.message)
+                
+        except Exception as e:
+            response.success = False
+            response.message = f"雨量清零过程中发生异常: {str(e)}"
+            response.current_rainfall = -1.0
+            rospy.logerr(response.message)
+        
+        return response
 
+    def handle_set_sensitivity(self, req):
+        """处理设置灵敏度服务请求"""
+        rospy.loginfo(f"收到设置雨量灵敏度请求: {req.sensitivity}")
+        
+        response = RainfallSetSensitivityResponse()
+        
+        # 参数验证
+        if not (0x00 < req.sensitivity <= 0x11):
+            response.success = False
+            response.message = f"灵敏度值超出范围 (0x01-0x11): {req.sensitivity}"
+            rospy.logerr(response.message)
+            return response
+        
+        try:
+            success = self.write_weather_register(self.RAINFALL_SENSITIVITY_REG, req.sensitivity)
+            
+            if success:
+                response.success = True
+                response.message = f"雨量灵敏度设置为: {req.sensitivity} (0x{req.sensitivity:02X})"
+                rospy.loginfo(response.message)
+            else:
+                response.success = False
+                response.message = "灵敏度设置指令发送失败"
+                rospy.logerr(response.message)
+                
+        except Exception as e:
+            response.success = False
+            response.message = f"设置灵敏度过程中发生异常: {str(e)}"
+            rospy.logerr(response.message)
+        
+        return response
     # -------------------------- 电池串口相关（保留原逻辑，仅修改函数名避免混淆）--------------------------
     def init_battery_serial(self, port, baudrate):
         """电池串口初始化（原init_serial修改名）"""
@@ -105,8 +201,8 @@ class BatteryWeatherStationNode:
             if self.ser:
                 self.ser.close()
             self.init_battery_serial(
-                port=rospy.get_param('~battery_serial_port', '/dev/Battery'),
-                baudrate=rospy.get_param('~battery_baudrate', 115200)
+                port=rospy.get_param('~battery_serial_port', '/dev/battery-weather'),
+                baudrate=rospy.get_param('~battery_baudrate', 9600)
             )
             return True
         except Exception as e:
@@ -155,7 +251,6 @@ class BatteryWeatherStationNode:
         except Exception as e:
             rospy.logwarn(f"气象站数据读取未知错误: {str(e)}")
             return None
-
     def read_weather_data(self):
         """读取并发布气象站数据（整合原run中的气象站逻辑）"""
         msg = Environment()
@@ -191,6 +286,39 @@ class BatteryWeatherStationNode:
         
         # 发布气象站数据
         self.weather_pub.publish(msg)
+    def write_weather_register(self, addr, value):
+        """写入气象站Modbus寄存器（用于清零等操作）"""
+        # 检查连接，断开则重连
+        if not self.weather_client.is_socket_open():
+            rospy.logwarn("气象站Modbus连接断开，尝试重连")
+            self.weather_client.connect()
+            if not self.weather_client.is_socket_open():
+                rospy.logerr("气象站Modbus重连失败")
+                return False
+        
+        try:
+            response = self.weather_client.write_register(
+                address=addr, value=value, slave=self.weather_slave_id
+            )
+            if response.isError():
+                rospy.logwarn(f"气象站寄存器写入错误: {response}")
+                return False
+            rospy.loginfo(f"成功写入寄存器 0x{addr:04X}, 值: 0x{value:04X}")
+            return True
+        except ModbusException as e:
+            rospy.logwarn(f"气象站Modbus写入异常: {str(e)}")
+            return False
+        except Exception as e:
+            rospy.logwarn(f"气象站数据写入未知错误: {str(e)}")
+            return False
+        
+    def reset_rainfall(self):
+        """清零雨量"""
+        return self.write_weather_register(self.RAINFALL_RESET_REG, self.RESET_VALUE)
+    
+    def set_sensitivity(self, sensitivity):
+        """设置灵敏度"""
+        return self.write_weather_register(self.RAINFALL_SENSITIVITY_REG, sensitivity)
 
     # -------------------------- 电池数据处理（保留原逻辑，删除继电器相关调用）--------------------------
     def calculate_checksum(self, check_bytes):

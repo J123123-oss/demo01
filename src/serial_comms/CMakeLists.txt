@@ -61,10 +61,11 @@ add_message_files(
 )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   motorgpio.srv
-# )
+add_service_files(
+  FILES
+  RainfallReset.srv
+  RainfallSetSensitivity.srv
+)
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -133,13 +134,13 @@ target_link_libraries(weather_station
 add_dependencies(weather_station ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 
-add_executable(wtrtk_serial_driver src/wtrtk_serial_driver.cpp)
-add_dependencies(wtrtk_serial_driver ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(wtrtk_serial_driver
-  ${catkin_LIBRARIES}
-  serial
-)
-link_directories(/opt/ros/noetic/lib)
+# add_executable(wtrtk_serial_driver src/wtrtk_serial_driver.cpp)
+# add_dependencies(wtrtk_serial_driver ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# target_link_libraries(wtrtk_serial_driver
+#   ${catkin_LIBRARIES}
+#   serial
+# )
+# link_directories(/opt/ros/noetic/lib)
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/serial_comms.cpp

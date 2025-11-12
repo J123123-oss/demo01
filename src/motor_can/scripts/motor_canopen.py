@@ -9,7 +9,7 @@ from std_msgs.msg import String, Int8, Float32, Float32MultiArray,Bool
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
-from serial_comms.msg import BatteryStatus  # 确保导入正确的消息类型
+from serial_comms.msg import BatteryStatus, Environment  # 确保导入正确的消息类型
 from std_srvs.srv import Trigger
 import threading
 import sys
@@ -215,11 +215,21 @@ class ServoDriveController:
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
         rospy.Subscriber('/relay_status', Bool, self.relay_callback)
+        rospy.Subscriber('/environment_data', Environment, self.environment_data_callback)
+
 
         # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
+        self.wind_speed = None
+        self.wind_direction = None
+        self.illuminance = None
+        self.rainfall = None
 
 
-
+    def environment_data_callback(self, msg):
+        self.wind_speed = msg.wind_speed
+        self.wind_direction = msg.wind_direction
+        self.illuminance = msg.illuminance
+        self.rainfall = msg.rainfall
 
     def set_state(self, new_state):
         if new_state not in self.status_config:
@@ -406,6 +416,10 @@ class ServoDriveController:
                 "complete_state":self.complete_state, # 任务完成状态
                 "auto_mode": self.auto_mode, # 自动模式开关,默认开
                 "relay_status": self.relay_status,
+                "wind_speed": self.wind_speed,
+                "wind_direction": self.wind_direction,
+                "illuminance": self.illuminance,
+                "rainfall":self.rainfall,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
@@ -976,7 +990,7 @@ class ServoDriveController:
                 self.elevator_start_time = rospy.get_time()  # 记录抬升开始时间
                 self.elevator_stage = 1  # 进入抬升中阶段
                 #同步开启IMU
-                self.start_imu()
+                # self.start_imu()
                 
             # 阶段1: 等待电缸完成抬升(非阻塞检查)
             elif self.elevator_stage == 1:
@@ -1666,7 +1680,7 @@ def main():
     rospy.init_node("motor_canopen_node")
     controller = ServoDriveController()
     # controller.stop_imu()
-    controller.start_imu()
+    # controller.start_imu()
     config = controller.load_config()
     if not config or "motors" not in config or not config["motors"]:
         rospy.logerr("未找到有效配置，请检查配置文件")
