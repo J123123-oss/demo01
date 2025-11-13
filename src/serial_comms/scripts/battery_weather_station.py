@@ -511,8 +511,11 @@ class BatteryWeatherStationNode:
     def run(self):
         rospy.loginfo("节点主循环开始运行")
         while not rospy.is_shutdown():
-            current_time = time.time()
+            if not self.ser:
+                rospy.loginfo("电池串口未打开")
+                return False
             
+            current_time = time.time()
             # 1. 优先读取电池串口数据
             self.read_battery_serial_data()
             
