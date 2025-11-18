@@ -7,7 +7,7 @@ from std_msgs.msg import Float32
 from serial_comms.msg import BatteryStatus  #导入自定义类型
 
 class BatteryMonitor:
-    def __init__(self, port, baudrate=115200):
+    def __init__(self, port, baudrate=9600):
         try:
             self.ser = serial.Serial(port, baudrate, timeout=1)
             rospy.loginfo(f"Connected to serial port: {port}")
@@ -162,7 +162,7 @@ class BatteryMonitor:
 
 if __name__ == '__main__':
     rospy.init_node('battery_monitor')
-    port = rospy.get_param('~serial_port', '/dev/battery-weather')
+    port = rospy.get_param('~serial_port', '/dev/ttyUSB1')
     monitor = BatteryMonitor(port)
     
     try:
