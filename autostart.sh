@@ -1,6 +1,6 @@
 #!/bin/bash
 
-sudo slcand -o -c -s6 /dev/CAN0 can0
+sudo slcand -o -c -s8 /dev/CAN0 can0
 # sudo slcand -o -c -S 115200 -s 6 /dev/ttyUSB5 can0
 sudo ifconfig can0 up
 

@@ -16,7 +16,7 @@ import sys
 import select
 # import os
 
-rate = 68  # Hz   166.66>> 68.26
+rate = 24  # rpm*24速比
 
 class ServoDriveController:
     # def __init__(self, channel='vcan0', interface='socketcan'):
@@ -33,11 +33,11 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 35000
-        self.base_speed = 17000   #设置后退基础速度值  * 0.8 > * 1
+        self.motor_base = 40   #下发电机理想转速rpm
+        self.base_speed = 40   #设置后退基础速度值  * 0.8 > * 1
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 2584000  #(380*rate)  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 60*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -55,6 +55,10 @@ class ServoDriveController:
         self.last_velocity_up = 0
         self.last_velocity_low = 0
         self.last_velocity_brush = 0
+        # 1. 线程控制标记：用于安全停止心跳线程（True=运行，False=停止）
+        self.heartbeat_running = False
+        # 2. 心跳线程对象：存储后台线程实例
+        self.heartbeat_thread = None
 
         #设置状态列表
         self.status_list = [
@@ -90,12 +94,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": -1600 * rate      #-1000 同向
+                "velocity_brush": -200 * rate      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -1600 * rate      #1000 同向
+                "velocity_brush": -200 * rate      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -104,7 +108,7 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": -1600 * rate   #1600
+                "velocity_brush": -200 * rate   #200
             },
             "UNLOADING":{
                 "velocity_up": -self.motor_base *rate,
@@ -187,7 +191,7 @@ class ServoDriveController:
         self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒1次
         self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
-        self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
+        # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
         # PID参数
         # self.pid_kp = 100.0
         # self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
@@ -195,10 +199,10 @@ class ServoDriveController:
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0  # 期望偏航角（可根据需要设定）
-        self.pid_kp = 100   # 降低比例增益减少振荡             原100
-        self.pid_ki = 0.1  # 提高积分增益增强对持续偏差的纠正   1.5
-        self.pid_kd = 10   # 大幅提高微分增益抑制快速变化       20 
-        self.pid_correction_max = 150  # 放宽输出限制        200
+        self.pid_kp = 30   # 降低比例增益减少振荡             原100
+        self.pid_ki = 0  # 提高积分增益增强对持续偏差的纠正   1.5
+        self.pid_kd = 5   # 大幅提高微分增益抑制快速变化       20   10 
+        self.pid_correction_max = 80  # 放宽输出限制        200   150
 
 
         self.progress = 0   # 进度百分比，0-100
@@ -264,18 +268,18 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
-            if self.fault_check_timer is not None:    
-                self.fault_check_timer.shutdown()
-                self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
+            # if self.fault_check_timer is not None:    
+                # self.fault_check_timer.shutdown()
+                # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
             threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
-            if self.fault_check_timer is not None:    
-                self.fault_check_timer.shutdown()
-                self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
+            # if self.fault_check_timer is not None:    
+                # self.fault_check_timer.shutdown()
+                # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
         # 进入运动状态时，只有当前不是REVERSE状态才更新prev_motion_state
         # if new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
@@ -309,72 +313,6 @@ class ServoDriveController:
         rospy.loginfo("电机向下转动，锁止")
         self.motor_cmd_pub.publish(Int8(data=-1))  # 发布电机控制指令
         self.initial_yaw = None  # 重置初始偏航角
-
-
-    def enter_absolute_position_mode(self, motor_id, position):
-        """设置电机进入绝对位置模式并设置目标位置"""
-        # 1. 设置位置模式
-        self.set_position_mode(motor_id)
-        
-        # 2. 设置目标位置
-        self.set_position_pulse(motor_id, position)
-        
-        # 3. 设置为绝对位置立即生效模式并启用
-        self.position_mode_enable(motor_id)
-        
-        rospy.loginfo(f"电机 {motor_id} 已进入绝对位置立即生效模式，目标位置: {position}")
-
-    def set_position_mode(self, motor_id):# 0x03>>0x01 ， 位置模式
-        self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00])
-        
-    def set_position_pulse(self, motor_id, pulse):
-        data = [
-            0x23, 0x7A, 0x60, 0x00,
-            pulse & 0xFF,
-            (pulse >> 8) & 0xFF,
-            (pulse >> 16) & 0xFF,
-            (pulse >> 24) & 0xFF
-        ]
-        # print(f"设置电机 {motor_id} 目标速度: {pulse} RPM")
-        self.send_command(motor_id, data)
-    def set_velocoty_pulse(self, motor_id, pulse):
-        data = [
-            0x23, 0x81, 0x60, 0x00,
-            pulse & 0xFF,
-            (pulse >> 8) & 0xFF,
-            (pulse >> 16) & 0xFF,
-            (pulse >> 24) & 0xFF
-        ]
-        self.send_command(motor_id, data)
-    
-    def position_mode_enable(self, motor_id):
-        '''设置电机工作在绝对位置模式，立即模式'''
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
-        # time.sleep(0.1)
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x3F, 0x00, 0x00, 0x00])
-        self.position_mode_configured = True  # 标记位置模式已配置
-        rospy.loginfo(f"电机 {motor_id} 绝对位置模式已启用并触发执行")
-        # 11 0x00000601 2B 40 60 00 2F 00 00 00
-        # 控制字 6040 h -00 h 设置为 002F h 设置驱动器工作在绝对位置立即模式，并
-        # 使能。
-        # 13 0x00000601 2B 40 60 00 3F 00 00 00
-        # 控制字 6040 h -00 h 设置为 003F h 设置驱动器工作在绝对位置立即模式，
-        # 6040 h -00 h 的 bit4 上升沿执行位置指令。
-
-    def read_motor_position(self, motor_id):
-        '''发送读取位置指令'''
-        self.send_command(motor_id, [0x40, 0x63, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
-        # 这里需要监听CAN总线返回的数据，实际项目中应用can库的recv()或回调
-        msg = self.bus.recv(timeout=0.5)
-        if msg and msg.arbitration_id == (0x580 + motor_id):
-            # 解析返回的4字节位置
-            pos = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
-            # 处理有符号数
-            if pos & 0x80000000:
-                pos -= 0x100000000
-            #rospy.loginfo(f"电机 {motor_id} 当前位置: {pos}")
-            return pos
-        return None
 
     def publish_state(self):
         """发布机器人状态信息，包含速度和状态"""
@@ -506,7 +444,7 @@ class ServoDriveController:
         self.bus = self.create_can_bus()
 
     def send_command(self, motor_id, command_data):
-        frame_id = 0x600 + motor_id
+        frame_id = 0x64 + motor_id
         msg = can.Message(arbitration_id=frame_id, data=command_data, is_extended_id=False)
         for attempt in range(3):
             try:
@@ -519,88 +457,134 @@ class ServoDriveController:
         rospy.logerr("CAN发送失败，已重试3次")
 
     def set_velocity_mode(self, motor_id):
-        self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x03, 0x00, 0x00, 0x00])
+        self.send_command(motor_id, [motor_id,0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
         
     def set_target_velocity(self, motor_id, velocity):
         data = [
-            0x23, 0xFF, 0x60, 0x00,
+            motor_id, 0x20, 0x00,
             velocity & 0xFF,
             (velocity >> 8) & 0xFF,
             (velocity >> 16) & 0xFF,
-            (velocity >> 24) & 0xFF
+            (velocity >> 24) & 0xFF,
+            0xFF
         ]
         # print(f"设置电机 {motor_id} 目标速度: {velocity} RPM")
         self.send_command(motor_id, data)
 
-    def get_actual_velocity(self, motor_id):
-        """
-        读取电机的实际运行速度 (606Ch, 单位: puu/s)
-        :param motor_id: 电机ID
-        :return: 实际速度值 (脉冲/秒)，读取失败返回None
-        """
-        # 发送读取606Ch的指令，16字节响应数据
-        self.send_command(motor_id, [0x40, 0x6C, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+    # def get_actual_velocity(self, motor_id):
+    #     """
+    #     读取电机的实际运行速度 (606Ch, 单位: puu/s)
+    #     :param motor_id: 电机ID
+    #     :return: 实际速度值 (脉冲/秒)，读取失败返回None
+    #     """
+    #     # 发送读取606Ch的指令，16字节响应数据
+    #     self.send_command(motor_id, [0x40, 0x6C, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
         
-        # 等待接收响应
-        start_time = time.time()
-        while time.time() - start_time < 0.5:  # 超时500ms
-            try:
-                msg = self.bus.recv(timeout=0.1)
-            except (can.CanError, OSError) as e:
-                rospy.logerr(f"CAN接收错误: {e}，尝试重连...")
-                self.reconnect_can_bus()
-                continue
-            if msg and msg.arbitration_id == (0x580 + motor_id):
-                # 检查是否为有效的606Ch响应
-                if len(msg.data) >= 8 and msg.data[0] == 0x43 and msg.data[1] == 0x6C and msg.data[2] == 0x60:
-                    # 解析32位速度值 (Int32)
-                    velocity = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
+    #     # 等待接收响应
+    #     start_time = time.time()
+    #     while time.time() - start_time < 0.5:  # 超时500ms
+    #         try:
+    #             msg = self.bus.recv(timeout=0.1)
+    #         except (can.CanError, OSError) as e:
+    #             rospy.logerr(f"CAN接收错误: {e}，尝试重连...")
+    #             self.reconnect_can_bus()
+    #             continue
+    #         if msg and msg.arbitration_id == (0x580 + motor_id):
+    #             # 检查是否为有效的606Ch响应
+    #             if len(msg.data) >= 8 and msg.data[0] == 0x43 and msg.data[1] == 0x6C and msg.data[2] == 0x60:
+    #                 # 解析32位速度值 (Int32)
+    #                 velocity = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
                     
-                    # 判断数值是否为负数（16位有符号数）
-                    if velocity > 0x7FFFFFFF:
-                        velocity -= 0x100000000
+    #                 # 判断数值是否为负数（16位有符号数）
+    #                 if velocity > 0x7FFFFFFF:
+    #                     velocity -= 0x100000000
 
-                    # 转换为速度（RPM）
-                    # 注意：1 RPM = 68 pulses per second（因为rate = 68 Hz）
-                    rpm = abs(velocity) / 68
+    #                 # 转换为速度（RPM）
+    #                 # 注意：1 RPM = 68 pulses per second（因为rate = 68 Hz）
+    #                 rpm = abs(velocity) / 68
                 
-                    # rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} puu/s | 约 {rpm} rpm")
-                    return velocity  # 返回32位整数形式
-        rospy.logwarn(f"读取电机 {motor_id} 当前速度失败")
-        return 0
+    #                 # rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} puu/s | 约 {rpm} rpm")
+    #                 return velocity  # 返回32位整数形式
+    #     rospy.logwarn(f"读取电机 {motor_id} 当前速度失败")
+    #     return 0
 
     
-    def set_acceleration(self, motor_id, acceleration):
-        data = [
-            0x23, 0x83, 0x60, 0x00,
-            acceleration & 0xFF,
-            (acceleration >> 8) & 0xFF,
-            (acceleration >> 16) & 0xFF,
-            (acceleration >> 24) & 0xFF
-        ]
-        self.send_command(motor_id, data)
+    # def set_acceleration(self, motor_id, acceleration):
+    #     data = [
+    #         0x23, 0x83, 0x60, 0x00,
+    #         acceleration & 0xFF,
+    #         (acceleration >> 8) & 0xFF,
+    #         (acceleration >> 16) & 0xFF,
+    #         (acceleration >> 24) & 0xFF
+    #     ]
+    #     self.send_command(motor_id, data)
     
-    def set_deceleration(self, motor_id, deceleration):
-        data = [
-            0x23, 0x84, 0x60, 0x00,
-            deceleration & 0xFF,
-            (deceleration >> 8) & 0xFF,
-            (deceleration >> 16) & 0xFF,
-            (deceleration >> 24) & 0xFF
-        ]
-        self.send_command(motor_id, data)
+    # def set_deceleration(self, motor_id, deceleration):
+    #     data = [
+    #         0x23, 0x84, 0x60, 0x00,
+    #         deceleration & 0xFF,
+    #         (deceleration >> 8) & 0xFF,
+    #         (deceleration >> 16) & 0xFF,
+    #         (deceleration >> 24) & 0xFF
+    #     ]
+    #     self.send_command(motor_id, data)
     
     def enable_drive(self, motor_id):
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
+        self.send_command(motor_id, [motor_id, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
     
     def disable_drive(self, motor_id):
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x06, 0x00, 0x00, 0x00])
+        self.send_command(motor_id, [motor_id, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
         
     def start_motor(self, motor_id):
-        if not 1 <= motor_id <= 127:
-            raise ValueError(f"电机ID {motor_id} 超出有效范围 (1-127)")
+        "实现写操作需要先修改4号为8，74号为1"
+        if not 0 <= motor_id <= 255:
+            raise ValueError(f"电机ID {motor_id} 超出有效范围 (0-255)")
         motor_id_byte = motor_id & 0xFF
-        self.send_command(motor_id, [0x01, motor_id_byte])
+        self.send_command(motor_id, [motor_id, 0x15, 0x01, 0x04, 0x00, 0x08, 0x00, 0xFF])
+        self.send_command(motor_id, [motor_id, 0x15, 0x01, 0x4A, 0x00, 0x01, 0x00, 0xFF])
+        # 开启心跳帧，掉线停止电机：02 10 88 00 00 00 00 FF
+        # self.send_command(motor_id, [motor_id, 0x10, 0x88, 0x00, 0x00, 0x00, 0x00, 0xFF])
+        # 修改心跳周期为1000ms：02 15 01 B1 00 E8 03 FF
+        self.send_command(motor_id, [motor_id, 0x15, 0x01, 0xB1, 0x00, 0xE8, 0x03, 0xFF])
+
+        # self.send_command(motor_id, [0x01, motor_id_byte])
+    def _send_heartbeat_0x10(self, motor_id):
+        """发送0x10设备心跳帧（初始化时一次）"""
+        # 数据帧：DATE[0]=motor_id，DATE[1]=0x10，DATE[2]=0x88（空闲状态），其余固定
+        data_frame = [motor_id, 0x10, 0x88, 0x00, 0x00, 0x00, 0x00, 0xFF]
+        self.send_command(motor_id, data_frame)
+
+    def _cycle_send_heartbeat_0x08(self, motor_id, interval=1.5):
+        """周期发送0x08连接保活帧（默认1.5秒/次，小于2秒避免超时）"""
+        # 数据帧：DATE[0]=motor_id，DATE[1]=0x08，其余固定为0x00或0xFF
+        data_frame = [motor_id, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF]
+        while self.heartbeat_running:  # 线程运行标记：True时持续发送
+            self.send_command(motor_id, data_frame)
+            time.sleep(interval)  # 间隔interval秒发送一次（建议1~1.5秒，留缓冲）
+
+    def start_heartbeat(self, motor_id):
+        """启动心跳检测：先发送0x10帧，再启动0x08帧周期发送线程"""
+        # 1. 防止重复启动线程（若已运行则先停止）
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.stop_heartbeat()
+        # 2. 发送一次0x10设备心跳帧
+        self._send_heartbeat_0x10(motor_id)
+        # 3. 启动0x08帧周期发送线程（设为守护线程，主程序退出时自动销毁）
+        self.heartbeat_running = True
+        self.heartbeat_thread = threading.Thread(
+            target=self._cycle_send_heartbeat_0x08,
+            args=(motor_id,),  # 传入电机ID
+            daemon=True  # 守护线程：主程序退出时线程自动停止，避免资源泄漏
+        )
+        self.heartbeat_thread.start()
+        print(f"心跳检测启动：电机ID={motor_id}，0x08帧每1.5秒发送一次")
+
+    def stop_heartbeat(self):
+        """停止心跳检测线程（安全退出）"""
+        self.heartbeat_running = False
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=2)  # 等待线程最多2秒退出
+        print("心跳检测已停止")
     
     def configure_motor(self, motor_id, velocity, acceleration, deceleration):
         # 检查电机故障
@@ -618,9 +602,11 @@ class ServoDriveController:
         self.start_motor(motor_id)
         self.set_velocity_mode(motor_id)
         self.set_target_velocity(motor_id, velocity)  #输出转换为脉冲/秒
-        self.set_acceleration(motor_id, acceleration)
-        self.set_deceleration(motor_id, deceleration)
+        # self.set_acceleration(motor_id, acceleration)
+        # self.set_deceleration(motor_id, deceleration)
         self.enable_drive(motor_id)
+        self.start_heartbeat(motor_id)
+
 
     def shutdown(self):
         rospy.loginfo("正在关闭电机控制器...")
@@ -636,8 +622,8 @@ class ServoDriveController:
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -998,8 +984,8 @@ class ServoDriveController:
             elif self.elevator_stage == 1:
                 elapsed = rospy.get_time() - self.elevator_start_time
                 
-                # 等待20秒完成电缸抬升
-                if elapsed >= 20:
+                # 等待20秒完成电缸抬升 ,无电缸测试，使用1秒
+                if elapsed >= 1.0:
                     rospy.loginfo("开始配置电机速度模式...")
                     config = self.load_config()
                     
@@ -1311,9 +1297,9 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
             self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
-            if self.fault_check_timer is not None:
-                self.fault_check_timer.shutdown()
-            self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
+            # if self.fault_check_timer is not None:
+                # self.fault_check_timer.shutdown()
+            # self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
     def get_max_torque(self, motor_id):
         """
         读取配置的最大转矩 (6072h)
@@ -1499,154 +1485,6 @@ class ServoDriveController:
                 utilization = abs(actual_torque) / max_torque * 100
                 if utilization > 80:
                     rospy.logwarn(f"电机 {motor_id} 转矩利用率过高: {utilization:.1f}%")
-    def read_energy_saving_mode(self, motor_id):
-        """读取省电功能总开关 Fn_1d0 的参数值（总线零速度指令模式下的自动省电功能模式）"""
-        # 发送读取 Fn_1d0 指令：CANopen SDO 读取命令，索引 0x2200（Fn_1d0），子索引 0x00
-        # 命令格式：[0x40（读取命令字）, 0x00（索引低字节）, 0x22（索引高字节）, 0x00（子索引）, 0x00, 0x00, 0x00, 0x00]
-        self.send_command(motor_id, [0x40, 0xD0, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00])
-        rospy.loginfo(f"已向电机 {motor_id} 发送读取 Fn_1d0 指令")
-
-        # 接收回复，超时时间 0.5 秒（与故障码读取保持一致）
-        start_time = time.time()
-        while time.time() - start_time < 0.5:
-            msg = self.bus.recv(0.1)  # 每次等待 100ms
-            if msg and msg.arbitration_id == (0x580 + motor_id):  # 验证电机回复的仲裁 ID
-                print("Fn_1d0 读取响应数据:", msg.data)
-                # 验证响应格式：数据长度≥6，且索引匹配（0x2200，小端模式为 0x00 0x22）
-                if len(msg.data) >= 6 and msg.data[1] == 0xD0 and msg.data[2] == 0x21:
-                    # 解析 Fn_1d0 值（16 位无符号整数，低字节 data[4]，高字节 data[5]）
-                    fn_1d0_value = msg.data[4] | (msg.data[5] << 8)
-                    rospy.loginfo(f"电机 {motor_id} Fn_1d0（省电功能模式）当前值: {fn_1d0_value}")
-                    # Fn_1d0 取值含义：0=关闭，1=总线指令触发，2=超时触发，3=指令或超时触发
-                    mode_desc = {0: "关闭自动省电功能", 1: "总线指令触发省电", 2: "停机超时触发省电", 3: "指令或超时触发省电"}
-                    rospy.loginfo(f"Fn_1d0 模式说明: {mode_desc.get(fn_1d0_value, '未知模式')}")
-                    return fn_1d0_value  # 返回读取到的 Fn_1d0 值
-
-        # 超时处理
-        rospy.logwarn(f"读取电机 {motor_id} Fn_1d0 超时")
-        return None  # 超时返回 None
-    def set_energy_saving_mode(self, motor_id, target_value=3):
-        """修改省电功能总开关 Fn_1d0 为目标值（默认 3：指令或超时触发，假设对应索引 0x2200.00）"""
-        # 校验目标值合法性：Fn_1d0 仅支持 0-3（文档规定模式）
-        if target_value not in [0, 1, 2, 3]:
-            rospy.logerror(f"Fn_1d0 目标值 {target_value} 非法！仅支持 0（关闭）、1（指令触发）、2（超时触发）、3（指令或超时触发）")
-            return False
-
-        # 发送修改 Fn_1d0 指令：CANopen SDO 写入命令，索引 0x2200.00，目标值 target_value
-        # 命令格式：[0x23（写入命令字）, 0x00（索引低字节）, 0x22（索引高字节）, 0x00（子索引）, 
-        #           target_value低字节, target_value高字节, 0x00, 0x00]（16位无符号整数）
-        low_byte = target_value & 0xFF  # 目标值低字节
-        high_byte = (target_value >> 8) & 0xFF  # 目标值高字节
-        self.send_command(motor_id, [0x2B, 0xD0, 0x21, 0x00, low_byte, high_byte, 0x00, 0x00])
-        rospy.loginfo(f"已向电机 {motor_id} 发送设置 Fn_1d0 指令，目标值: {target_value}")
-
-        # 接收写入确认，超时时间 0.5 秒
-        start_time = time.time()
-        while time.time() - start_time < 0.5:
-            msg = self.bus.recv(0.1)
-            if msg and msg.arbitration_id == (0x580 + motor_id):  # 验证回复 ID
-                print("Fn_1d0 设置响应数据:", msg.data)
-                # 验证响应：索引匹配（0x2200），且命令字为 0x60（SDO 写入确认，部分电机用 0x43，需根据实际调整）
-                if len(msg.data) >= 4 and msg.data[1] == 0xD0 and msg.data[2] == 0x21:
-                    # 确认写入成功（部分电机响应中会带回写入值，可额外校验）
-                    rospy.loginfo(f"电机 {motor_id} Fn_1d0 已成功设置为 {target_value}（指令或超时触发省电）")
-                    return True  # 设置成功返回 True
-
-        # 超时处理
-        rospy.logwarn(f"设置电机 {motor_id} Fn_1d0 超时，可能未生效")
-        return False  # 超时返回 False
-    
-    def read_torque_zero_params(self, motor_id):
-        """读取零转矩判定参数：Fn_04b（零转矩到达门限）和 Fn_04c（零转矩到达回差值）"""
-        # 定义参数与CANopen索引的映射（需根据电机手册确认真实索引）
-        param_map = {
-            "Fn_04b": {"index": 0x204B, "desc": "零转矩到达门限（额定转矩千分之一）"},
-            "Fn_04c": {"index": 0x204C, "desc": "零转矩到达回差值（额定转矩千分之一）"}
-        }
-        result = {}
-
-        for param_name, info in param_map.items():
-            index = info["index"]
-            # 构造SDO读取命令：[0x40(读取命令字), 索引低字节, 索引高字节, 0x00(子索引), 0x00*4]
-            cmd_low_byte = index & 0xFF
-            cmd_high_byte = (index >> 8) & 0xFF
-            self.send_command(motor_id, [0x40, cmd_low_byte, cmd_high_byte, 0x00, 0x00, 0x00, 0x00, 0x00])
-            rospy.loginfo(f"已向电机 {motor_id} 发送读取 {param_name}（索引0x{index:04X}）指令")
-
-            # 接收该参数的回复
-            start_time = time.time()
-            param_value = None
-            while time.time() - start_time < 0.5:  # 单参数读取超时0.5秒
-                msg = self.bus.recv(0.1)
-                if msg and msg.arbitration_id == (0x580 + motor_id):  # 验证电机回复ID
-                    print(f"{param_name} 读取响应数据:", msg.data)
-                    # 验证响应格式：数据长度≥6，且索引匹配（低字节msg.data[1]，高字节msg.data[2]）
-                    if len(msg.data) >= 6 and msg.data[1] == cmd_low_byte and msg.data[2] == cmd_high_byte:
-                        # 解析16位无符号参数值（低字节data[4]，高字节data[5]）
-                        param_value = msg.data[4] | (msg.data[5] << 8)
-                        rospy.loginfo(f"电机 {motor_id} {param_name}（{info['desc']}）: {param_value}")
-                        break
-            
-            if param_value is not None:
-                result[param_name] = param_value
-            else:
-                rospy.logwarn(f"读取电机 {motor_id} {param_name} 超时")
-                result[param_name] = None
-
-        # 额外输出判定区间分析（基于文档中“配合形成区间”的要求）
-        if result["Fn_04b"] is not None and result["Fn_04c"] is not None:
-            lower_limit = result["Fn_04b"]
-            upper_limit = result["Fn_04b"] + result["Fn_04c"]
-            if result["Fn_04c"] == 0:
-                rospy.logwarn(f"电机 {motor_id} Fn_04c 为0，零转矩判定区间异常（仅[{lower_limit}, {upper_limit}]），易误判未满足条件")
-            else:
-                rospy.loginfo(f"电机 {motor_id} 零转矩判定区间: [{lower_limit}, {upper_limit}]（额定转矩千分之一）")
-        return result
-    
-    def set_torque_zero_param(self, motor_id, param_name, target_value):
-        """修改零转矩判定参数：支持 Fn_04b（零转矩到达门限）或 Fn_04c（零转矩到达回差值）"""
-        # 定义参数与CANopen索引的映射（需根据电机手册确认真实索引）
-        param_config = {
-            "Fn_04b": {"index": 0x204B, "desc": "零转矩到达门限", "min": 0, "max": 1000},  # 假设范围0-1000（额定转矩千分之一）
-            "Fn_04c": {"index": 0x20C, "desc": "零转矩到达回差值", "min": 0, "max": 500}   # 假设范围0-500（额定转矩千分之一）
-        }
-
-        # 校验参数名合法性
-        if param_name not in param_config:
-            rospy.logerror(f"不支持的参数名 {param_name}！仅支持 {list(param_config.keys())}")
-            return False
-        info = param_config[param_name]
-
-        # 校验目标值范围（基于文档“合理判定区间”要求，Fn_04c建议非0）
-        if not (info["min"] <= target_value <= info["max"]):
-            rospy.logerror(f"{param_name}（{info['desc']}）目标值 {target_value} 非法！需在 [{info['min']}, {info['max']}] 范围内")
-            return False
-        if param_name == "Fn_04c" and target_value == 0:
-            rospy.logwarn(f"警告：{param_name} 设为0会导致零转矩判定异常，建议设为与Fn_04b一致的值（如100）")
-
-        # 构造SDO写入命令：[0x23(写入命令字), 索引低字节, 索引高字节, 0x00(子索引), 目标值低字节, 目标值高字节, 0x00, 0x00]
-        index = info["index"]
-        cmd_low_byte = index & 0xFF
-        cmd_high_byte = (index >> 8) & 0xFF
-        target_low = target_value & 0xFF
-        target_high = (target_value >> 8) & 0xFF
-        self.send_command(motor_id, [0x2B, cmd_low_byte, cmd_high_byte, 0x00, target_low, target_high, 0x00, 0x00])
-        rospy.loginfo(f"已向电机 {motor_id} 发送设置 {param_name} 指令，目标值: {target_value}（{info['desc']}）")
-
-        # 接收写入确认
-        start_time = time.time()
-        while time.time() - start_time < 0.5:
-            msg = self.bus.recv(0.1)
-            if msg and msg.arbitration_id == (0x580 + motor_id):
-                print(f"{param_name} 设置响应数据:", msg.data)
-                # 验证响应索引匹配
-                if len(msg.data) >= 4 and msg.data[1] == cmd_low_byte and msg.data[2] == cmd_high_byte:
-                    rospy.loginfo(f"电机 {motor_id} {param_name} 已成功设置为 {target_value}")
-                    return True
-
-        rospy.logwarn(f"设置电机 {motor_id} {param_name} 超时，可能未生效")
-        return False
-    
     def start_imu(self):
         while not rospy.is_shutdown():
             try:
