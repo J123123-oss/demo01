@@ -208,6 +208,7 @@ class ServoDriveController:
         self.battery_temperatures = [] # 电池温度，共3个
         #继电器状态
         self.relay_status = None
+        self.relay_auto_off = None
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
@@ -215,6 +216,8 @@ class ServoDriveController:
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
         rospy.Subscriber('/relay_status', Bool, self.relay_callback)
+        rospy.Subscriber('/relay_auto_off', Bool, self.relay_auto_off_callback)
+
 
         # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
 
@@ -406,6 +409,7 @@ class ServoDriveController:
                 "complete_state":self.complete_state, # 任务完成状态
                 "auto_mode": self.auto_mode, # 自动模式开关,默认开
                 "relay_status": self.relay_status,
+                "relay_auto_off": self.relay_auto_off,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
@@ -470,6 +474,9 @@ class ServoDriveController:
     def relay_callback(self, msg):
         #继电器状态
         self.relay_status = msg.data
+    def relay_auto_off_callback(self, msg):
+        # 继电器超时关闭状态
+        self.relay_auto_off = msg.data
 
 
     def create_can_bus(self):
