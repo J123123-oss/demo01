@@ -33,15 +33,15 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 40   #下发电机理想转速rpm
-        self.base_speed = 40   #设置后退基础速度值  * 0.8 > * 1
+        self.motor_base = 20   #下发电机理想转速rpm
+        self.base_speed = 20   #设置后退基础速度值  * 0.8 > * 1
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 60*rate  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 50*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
-        self.unloading_timer = 20.0
+        self.unloading_timer = 1.0
         self.unloading_start_time = None
         self.start_time = 0
         self.elevator_stage = 0  # 电缸升降阶段: 0=待抬升,1=抬升中,2=抬升完成
@@ -94,12 +94,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": -200 * rate      #-1000 同向
+                "velocity_brush": -80 * rate      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -200 * rate      #1000 同向
+                "velocity_brush": 80 * rate      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -108,12 +108,12 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": -200 * rate   #200
+                "velocity_brush": -80 * rate   #200
             },
             "UNLOADING":{
                 "velocity_up": -self.motor_base *rate,
                 "velocity_low": self.motor_base *rate,
-                "velocity_brush": 0
+                "velocity_brush": 80
             },
             "UPSTOP":{
                 "velocity_up": 0,
@@ -251,7 +251,7 @@ class ServoDriveController:
         # if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
         if self.auto_mode and new_state in ["FORWARD", "BACKWARD"]:
             self.auto_step = new_state
-            # print("auto_step:",self.auto_step)
+            # rospy.loginfo("auto_step:",self.auto_step)
         # 初始化为速度模式，添加恢复状态
         if new_state == "START" or new_state == "CHARGE_OUT" or new_state == "RETURN_DOCK":
             self.complete_state = False
@@ -268,6 +268,8 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+                    # 1. 防止重复启动线程（若已运行则先停止）
+                self.stop_heartbeat()
             # if self.fault_check_timer is not None:    
                 # self.fault_check_timer.shutdown()
                 # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
@@ -376,7 +378,7 @@ class ServoDriveController:
                 self.publish_state()
                 # return
             elif command in self.status_list:
-                # print("cmd:", command)
+                # rospy.loginfo("cmd:", command)
                 self.set_state(command)  
             else:
                 rospy.logwarn(f"未找到command字段: {msg.data}")
@@ -444,17 +446,53 @@ class ServoDriveController:
         self.bus = self.create_can_bus()
 
     def send_command(self, motor_id, command_data):
+        """
+        Send a CAN command with robust handling for a disconnected socket.
+
+        Returns True on success, False otherwise. This method checks the
+        underlying socket fileno() to avoid calling select/send on a closed
+        socket (which raises ValueError: file descriptor cannot be a negative
+        integer (-1)). It will attempt a few retries and call reconnect_can_bus()
+        on recoverable errors.
+        """
+        # Basic existence check
+        if self.bus is None:
+            rospy.logerr("错误：CAN总线未初始化，无法发送指令")
+            return False
+
+        # Validate socket file descriptor if available
+        try:
+            sock = getattr(self.bus, 'socket', None)
+            if sock is None or not hasattr(sock, 'fileno') or sock.fileno() < 0:
+                rospy.logerr("CAN socket 无效或已关闭 (fileno<0)，尝试重连...")
+                self.reconnect_can_bus()
+                return False
+        except Exception as e:
+            # If checking fileno fails for any reason, log and proceed to attempt send;
+            # the send call below will handle errors and trigger reconnect as needed.
+            rospy.logwarn(f"检查 CAN socket fileno 时发生异常: {e}")
+
         frame_id = 0x64 + motor_id
         msg = can.Message(arbitration_id=frame_id, data=command_data, is_extended_id=False)
+
         for attempt in range(3):
             try:
                 self.bus.send(msg)
                 time.sleep(0.05)
-                return
-            except (can.CanError, OSError) as e:
-                rospy.logerr(f"CAN通信错误: {e}，尝试重连...")
-                self.reconnect_can_bus()
+                return True
+            except (can.CanError, OSError, ValueError) as e:
+                # ValueError can be raised by the socketcan backend when the underlying
+                # socket file descriptor is invalid (-1). Catch it here and reconnect.
+                rospy.logerr(f"CAN通信错误 ({type(e).__name__}): {e}，尝试重连... (attempt {attempt+1}/3)")
+                try:
+                    self.reconnect_can_bus()
+                except Exception:
+                    pass
+                # small backoff before retrying
+                time.sleep(0.05)
+
         rospy.logerr("CAN发送失败，已重试3次")
+        return False
 
     def set_velocity_mode(self, motor_id):
         self.send_command(motor_id, [motor_id,0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
@@ -468,7 +506,7 @@ class ServoDriveController:
             (velocity >> 24) & 0xFF,
             0xFF
         ]
-        # print(f"设置电机 {motor_id} 目标速度: {velocity} RPM")
+        # rospy.loginfo(f"设置电机 {motor_id} 目标速度: {velocity} RPM")
         self.send_command(motor_id, data)
 
     # def get_actual_velocity(self, motor_id):
@@ -491,6 +529,7 @@ class ServoDriveController:
     #             continue
     #         if msg and msg.arbitration_id == (0x580 + motor_id):
     #             # 检查是否为有效的606Ch响应
+
     #             if len(msg.data) >= 8 and msg.data[0] == 0x43 and msg.data[1] == 0x6C and msg.data[2] == 0x60:
     #                 # 解析32位速度值 (Int32)
     #                 velocity = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
@@ -564,9 +603,14 @@ class ServoDriveController:
 
     def start_heartbeat(self, motor_id):
         """启动心跳检测：先发送0x10帧，再启动0x08帧周期发送线程"""
+        if self.bus is None or self.bus.socket == -1:
+            rospy.loginfo("错误：CAN总线未就绪，无法启动心跳检测")
+            return  # 不启动线程，直接返回
         # 1. 防止重复启动线程（若已运行则先停止）
-        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
-            self.stop_heartbeat()
+        # if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+        #     rospy.loginfo(f"电机心跳线程已在运行，无需重复启动")
+        #     return
+        #     self.stop_heartbeat()
         # 2. 发送一次0x10设备心跳帧
         self._send_heartbeat_0x10(motor_id)
         # 3. 启动0x08帧周期发送线程（设为守护线程，主程序退出时自动销毁）
@@ -577,14 +621,14 @@ class ServoDriveController:
             daemon=True  # 守护线程：主程序退出时线程自动停止，避免资源泄漏
         )
         self.heartbeat_thread.start()
-        print(f"心跳检测启动：电机ID={motor_id}，0x08帧每1.5秒发送一次")
+        rospy.loginfo(f"心跳检测启动：电机ID={motor_id}，0x08帧每1.5秒发送一次")
 
     def stop_heartbeat(self):
         """停止心跳检测线程（安全退出）"""
         self.heartbeat_running = False
         if self.heartbeat_thread and self.heartbeat_thread.is_alive():
             self.heartbeat_thread.join(timeout=2)  # 等待线程最多2秒退出
-        print("心跳检测已停止")
+        rospy.loginfo("心跳检测已停止")
     
     def configure_motor(self, motor_id, velocity, acceleration, deceleration):
         # 检查电机故障
@@ -610,7 +654,7 @@ class ServoDriveController:
 
     def shutdown(self):
         rospy.loginfo("正在关闭电机控制器...")
-        self.set_target_velocity(1, 0)
+        self.set_target_velocity(3, 0)
         self.set_target_velocity(2, 0)
         self.set_target_velocity(3, 0)
         self.set_target_velocity(4, 0)
@@ -618,6 +662,7 @@ class ServoDriveController:
         self.disable_drive(2)
         self.disable_drive(3)
         self.disable_drive(4)
+        self.stop_heartbeat()
 
         self.bus.shutdown()
 
@@ -690,7 +735,7 @@ class ServoDriveController:
                         self.set_state("UNLOADING")
                         self.progress = 10
                         self.unloading_start_time = time.time()  # 记录开始时间
-                        # print("unloading_start_time:",self.unloading_start_time)
+                        # rospy.loginfo("unloading_start_time:",self.unloading_start_time)
                 else:
                     rospy.loginfo("充电状态，等待接近开关触发")
                 # 在UNLOADING状态，检查定时器
@@ -698,7 +743,7 @@ class ServoDriveController:
                     while hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
                         current_time = time.time()
                         elapsed = current_time - self.unloading_start_time
-                        # print(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
+                        # rospy.loginfo(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
                         
                         if elapsed >= self.unloading_timer and self.current_status == "UNLOADING":
                             self.set_state("STOP")
@@ -717,7 +762,7 @@ class ServoDriveController:
                         self.set_state("UNLOADING")
                         self.progress = 10
                         self.unloading_start_time = time.time()  # 记录开始时间
-                        # print("unloading_start_time:",self.unloading_start_time)
+                        # rospy.loginfo("unloading_start_time:",self.unloading_start_time)
                 elif(not msg.sensor_a and not msg.sensor_c):
                     self.set_state("BACKWARD")
                     self.progress = 20
@@ -727,7 +772,7 @@ class ServoDriveController:
                     while hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
                         current_time = time.time()
                         elapsed = current_time - self.unloading_start_time
-                        # print(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
+                        # rospy.loginfo(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
                         
                         if elapsed >= self.unloading_timer and self.current_status == "UNLOADING":
                             self.set_state("BACKWARD")
@@ -948,9 +993,10 @@ class ServoDriveController:
         
         # 积分限幅
         integral_max = 30   #300
+
         # self.pid_integral = 0
         self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
-        # print("pid_integral:",self.pid_integral)
+        # rospy.loginfo("pid_integral:",self.pid_integral)
         correction = (self.pid_kp * error +
                     self.pid_ki * self.pid_integral +
                     self.pid_kd * derivative)
@@ -1047,7 +1093,7 @@ class ServoDriveController:
                 # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
-                self.set_target_velocity(1, left_speed)
+                self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1093,7 +1139,7 @@ class ServoDriveController:
 
         # 3. 反向调整状态
         elif self.current_status == "REVERSE":
-            # print("self.prev_motion_state:",self.prev_motion_state)
+            # rospy.loginfo("self.prev_motion_state:",self.prev_motion_state)
             self.reversed_start_time = None
             # 执行后退矫正
             if not self.has_reverse_flag:
@@ -1118,7 +1164,7 @@ class ServoDriveController:
                     rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}")
                     rospy.loginfo(f"后退上轮速度: {left_speed}, 下轮速度: {right_speed}")
                     # 设置速度
-                    self.set_target_velocity(1, left_speed)
+                    self.set_target_velocity(3, left_speed)
                     self.set_target_velocity(2, right_speed)
                     self.set_target_velocity(4, brush_speed)
                 # 更新最后速度记录
@@ -1152,7 +1198,7 @@ class ServoDriveController:
                     rospy.loginfo(f"后退完毕上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
                     # 设置速度
-                    self.set_target_velocity(1, left_speed)
+                    self.set_target_velocity(3, left_speed)
                     self.set_target_velocity(2, right_speed)
                     self.set_target_velocity(4, brush_speed)
                 
@@ -1190,7 +1236,7 @@ class ServoDriveController:
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                self.set_target_velocity(1, left_speed)
+                self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1208,7 +1254,7 @@ class ServoDriveController:
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                self.set_target_velocity(1, left_speed)
+                self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1227,7 +1273,7 @@ class ServoDriveController:
                 self.last_brush_speed != 0):
                 self.has_reverse_counter = 0  # 重置后退计数器
                 self.set_target_velocity(2, 0)
-                self.set_target_velocity(1, 0)
+                self.set_target_velocity(3, 0)
                 self.set_target_velocity(4, 0)
 
                 # 停止使能电机，下次需使能
@@ -1261,7 +1307,7 @@ class ServoDriveController:
                 # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
-                self.set_target_velocity(1, left_speed)
+                self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1278,7 +1324,7 @@ class ServoDriveController:
                 # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
                 # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
-                self.set_target_velocity(1, left_speed)
+                self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
                 self.set_target_velocity(4, brush_speed)
                 self.last_left_speed = left_speed
@@ -1317,7 +1363,7 @@ class ServoDriveController:
                 # 检查是否是正确的返回数据
                 if len(msg.data) >= 6 and msg.data[0] in [0x4B, 0x43]:
                     # 16位返回值 (Uint16)
-                    # print(msg)
+                    # rospy.loginfo(msg)
                     max_torque = msg.data[4] | (msg.data[5] << 8)
                     # rospy.logwarn(f"读取电机最大转矩 {max_torque} ")
 
@@ -1407,11 +1453,11 @@ class ServoDriveController:
         while time.time() - start_time < 0.5:  # 500ms超时
             msg = self.bus.recv(0.1)  # 100ms等待
             if msg and msg.arbitration_id == (0x580 + motor_id):
-                # print("fault_code_data:",msg.data)
+                # rospy.loginfo("fault_code_data:",msg.data)
                 # 验证 SDO 响应类型（0x43 表示读取成功）
                 if len(msg.data) >= 6 and msg.data[1] == 0x3F and msg.data[1] == 0x3F and msg.data[2] == 0x60:
                     fault_code = msg.data[4] | (msg.data[5] << 8)
-                    # print("msg.data:", msg.data)
+                    # rospy.loginfo("msg.data:", msg.data)
                     if fault_code != 0:
                         rospy.logwarn(f"电机 {motor_id} 故障码: 0x{fault_code:04X} ({fault_code})")
                     else:
@@ -1443,7 +1489,7 @@ class ServoDriveController:
     def check_and_clear_faults(self):
         """定期检查并清除电机故障"""
         # for motor_id in [2, 3, 4]:  # 检查所有电机
-        for motor_id in [1]:  # 检查所有电机
+        for motor_id in [2,3,4]:  # 检查所有电机
             # 1. 检查故障码
             fault_code = self.read_fault_code(motor_id)
             actual_velocity = self.get_actual_velocity(motor_id)
@@ -1491,10 +1537,10 @@ class ServoDriveController:
                 rospy.wait_for_service('/imu_parser_node/start_imu', timeout=5)
                 start_srv = rospy.ServiceProxy('/imu_parser_node/start_imu', Trigger)
                 resp = start_srv()
-                print(resp.message)
+                rospy.loginfo(resp.message)
                 break
             except Exception as e:
-                print(f"等待IMU服务中: {e}")
+                rospy.loginfo(f"等待IMU服务中: {e}")
                 time.sleep(1)
 
     def stop_imu(self):
@@ -1502,9 +1548,9 @@ class ServoDriveController:
             rospy.wait_for_service('/imu_parser_node/stop_imu')
             stop_srv = rospy.ServiceProxy('/imu_parser_node/stop_imu', Trigger)
             resp = stop_srv()
-            print(resp.message)
+            rospy.loginfo(resp.message)
         except Exception as e:
-            print(f"调用IMU停止服务失败: {e}")
+            rospy.loginfo(f"调用IMU停止服务失败: {e}")
 
     @staticmethod
     def keyboard_listener(controller):
