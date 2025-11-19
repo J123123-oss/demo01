@@ -325,9 +325,9 @@ class ServoDriveController:
             # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
             if self.velocity_publish_count >= self.velocity_publish_interval:
                 # 获取新的速度数据
-                # self.last_velocity_up = self.get_actual_velocity(3)
-                self.last_velocity_low = self.get_actual_velocity(1)
-                # self.last_velocity_brush = self.get_actual_velocity(4)
+                self.last_velocity_up = self.get_actual_velocity(3)
+                self.last_velocity_low = self.get_actual_velocity(2)
+                self.last_velocity_brush = self.get_actual_velocity(4)
                 self.velocity_publish_count = 0  # 重置计数器
             
             # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
@@ -509,43 +509,43 @@ class ServoDriveController:
         # rospy.loginfo(f"设置电机 {motor_id} 目标速度: {velocity} RPM")
         self.send_command(motor_id, data)
 
-    # def get_actual_velocity(self, motor_id):
-    #     """
-    #     读取电机的实际运行速度 (606Ch, 单位: puu/s)
-    #     :param motor_id: 电机ID
-    #     :return: 实际速度值 (脉冲/秒)，读取失败返回None
-    #     """
-    #     # 发送读取606Ch的指令，16字节响应数据
-    #     self.send_command(motor_id, [0x40, 0x6C, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+    def get_actual_velocity(self, motor_id):
+        """
+        读取电机的实际运行速度 (606Ch, 单位: puu/s)
+        :param motor_id: 电机ID
+        :return: 实际速度值 (脉冲/秒)，读取失败返回None
+        """
+        # 12 fc 00 00 00 00 FF
+        self.send_command(motor_id, [motor_id, 0x12, 0xFC, 0x00, 0x00, 0x00, 0x00, 0xFF])
         
-    #     # 等待接收响应
-    #     start_time = time.time()
-    #     while time.time() - start_time < 0.5:  # 超时500ms
-    #         try:
-    #             msg = self.bus.recv(timeout=0.1)
-    #         except (can.CanError, OSError) as e:
-    #             rospy.logerr(f"CAN接收错误: {e}，尝试重连...")
-    #             self.reconnect_can_bus()
-    #             continue
-    #         if msg and msg.arbitration_id == (0x580 + motor_id):
-    #             # 检查是否为有效的606Ch响应
+        # 等待接收响应
+        start_time = time.time()
+        while time.time() - start_time < 0.5:  # 超时500ms
+            try:
+                msg = self.bus.recv(timeout=0.1)
+            except (can.CanError, OSError) as e:
+                rospy.logerr(f"CAN接收错误: {e}，尝试重连...")
+                self.reconnect_can_bus()
+                continue
+            if msg and msg.arbitration_id == (0x64 + motor_id):
+                # 检查是否为有效的606Ch响应
 
-    #             if len(msg.data) >= 8 and msg.data[0] == 0x43 and msg.data[1] == 0x6C and msg.data[2] == 0x60:
-    #                 # 解析32位速度值 (Int32)
-    #                 velocity = msg.data[4] | (msg.data[5] << 8) | (msg.data[6] << 16) | (msg.data[7] << 24)
+                if len(msg.data) >= 8 and msg.data[0] == motor_id and msg.data[1] == 0x12 and msg.data[2] == 0xFC:
+                    # 解析32位速度值 (Int32)
+                    velocity = msg.data[3] | (msg.data[4] << 8) | (msg.data[5] << 16) | (msg.data[6] << 24)
                     
-    #                 # 判断数值是否为负数（16位有符号数）
-    #                 if velocity > 0x7FFFFFFF:
-    #                     velocity -= 0x100000000
+                    # 判断数值是否为负数（16位符号数）
+                    if velocity > 0x7FFFFFFF:
+                        velocity -= 0x100000000
 
-    #                 # 转换为速度（RPM）
-    #                 # 注意：1 RPM = 68 pulses per second（因为rate = 68 Hz）
-    #                 rpm = abs(velocity) / 68
+                    # 转换为速度（RPM）
+                    # 注意：1 RPM = 68 pulses per second（因为rate = 68 Hz）
+                    rpm = abs(velocity) / 68
                 
-    #                 # rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} puu/s | 约 {rpm} rpm")
-    #                 return velocity  # 返回32位整数形式
-    #     rospy.logwarn(f"读取电机 {motor_id} 当前速度失败")
-    #     return 0
+                    # rospy.loginfo(f"电机 {motor_id} 实际速度: {velocity} rpm")
+                    return velocity  # 返回32位整数形式
+        rospy.logwarn(f"读取电机 {motor_id} 当前速度失败")
+        return 0
 
     
     # def set_acceleration(self, motor_id, acceleration):
