@@ -15,7 +15,7 @@ class IMUParser:
         
         # 参数配置
         self.port = rospy.get_param('~serial_port', '/dev/IMU')
-        self.baudrate = rospy.get_param('~baudrate', 9600)
+        self.baudrate = rospy.get_param('~baudrate', 115200)
         self.device_addr = 0x50
         self.rx_frame_length = 7
         self.ser = None
