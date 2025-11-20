@@ -67,6 +67,7 @@ class ServoDriveController:
             "BACKWARD",  # 后退状态
             "START",  # 速度模式初始化并使能[3]
             "LOADING", # 进仓
+            "PAUSE", # 对向暂停，与进仓滚刷转速相反
             "UNLOADING", # 出仓
             "UPSTOP", # 上电机停
             "LOWSTOP", # 下电机停
@@ -109,6 +110,12 @@ class ServoDriveController:
                 "velocity_up": 0,
                 "velocity_low": 0,
                 "velocity_brush": -80 * rate   #200
+            },
+            "PAUSE": {
+                #循环测试需要对向加入等待
+                "velocity_up": 0,
+                "velocity_low": 0,
+                "velocity_brush": 80 * rate   #200
             },
             "UNLOADING":{
                 "velocity_up": 0,
@@ -343,10 +350,9 @@ class ServoDriveController:
                 "battery_current": self.battery_current, # 电池电流
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                "velocity_up": round(velocity_up / rate, 2),  # 保留两位小数，数值类型
-                "velocity_low": round(velocity_low / rate, 2),
-                "velocity_brush": round(velocity_brush / rate, 2),
-                # "velocity_locking": 0,
+                "velocity_up": round(velocity_up * 20, 2),  # 保留两位小数，数值类型
+                "velocity_low": round(velocity_low * 20, 2),
+                "velocity_brush": round(velocity_brush * 12, 2),
                 "sensors_status": self.sensors_status,  # 超声波传感器状态
                 "device_status": {
                 "main_board": self.main_board,
@@ -689,6 +695,7 @@ class ServoDriveController:
             'a': "START",  # 速度模式初始化并使能
             'r': "REVERSE",
             'l': "LOADING",
+            'p': "PAUSE",
             'u': "UNLOADING",
             '1': "UPSTOP",
             '2': "LOWSTOP"
@@ -805,7 +812,7 @@ class ServoDriveController:
                 if msg.sensor_a and msg.sensor_c:
                     #清空自动流程状态
                     threading.Timer(5.0, self.lock_motor).start()
-                    self.set_state("STOP")
+                    self.set_state("PAUSE")
                     self.complete_state = True
                     # self.initial_yaw = None  # 重置初始偏航角
                     self.progress = 100
@@ -839,7 +846,7 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if msg.sensor_a and msg.sensor_c:
                     threading.Timer(5.0, self.lock_motor).start()
-                    self.set_state("STOP")
+                    self.set_state("PAUSE")
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
@@ -860,7 +867,7 @@ class ServoDriveController:
                 #     self.progress = 0
             elif self.current_status == self.status_list[2]:  # BACKWARD
                 if msg.sensor_b and msg.sensor_d:
-                    self.set_state("STOP")
+                    self.set_state("PAUSE")
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
@@ -881,7 +888,7 @@ class ServoDriveController:
                 #确保停到位
             if msg.sensor_c:
                 threading.Timer(5.0, self.lock_motor).start()
-                self.set_state("STOP")
+                self.set_state("PAUSE")
                 # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
@@ -908,7 +915,7 @@ class ServoDriveController:
                 #确保停到位
             if msg.sensor_a:
                 threading.Timer(5.0, self.lock_motor).start()
-                self.set_state("STOP")
+                self.set_state("PAUSE")
                 # time.sleep(1)
                 #清空自动流程状态
                 self.complete_state = True
@@ -1287,7 +1294,7 @@ class ServoDriveController:
             config = self.status_config["START"]
             
 
-        # 5. LOADING/UNLOADING状态：IMU矫正+边缘检测 未使用
+        # 5. UNLOADING状态 顺转加速出仓，防止卡顿
         elif self.current_status == "UNLOADING":
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
@@ -1305,8 +1312,8 @@ class ServoDriveController:
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
-        # 6.   LOADING 状态仅滚刷运动   
-        elif self.current_status == "LOADING":
+        # 6.   LOADING 状态、PAUSE状态仅滚刷运动   
+        elif self.current_status in ["LOADING", "PAUSE"]:
             left_speed = int(self.status_config[self.current_status]["velocity_up"])
             right_speed = int(self.status_config[self.current_status]["velocity_low"])
             brush_speed = self.status_config[self.current_status]["velocity_brush"]
