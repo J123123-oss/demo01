@@ -5,6 +5,7 @@ import serial
 import threading
 import time
 from std_msgs.msg import Header
+from sensor_msgs.msg import NavSatFix  #GNGGA解析结果
 from serial_comms.msg import WTRTK  # 替换为你的功能包名
 
 class WTRTKSerialDriver:
@@ -20,22 +21,21 @@ class WTRTKSerialDriver:
         self.ser = None
         self.connect_serial()
         
-        # 初始化消息发布者（话题名：/wtrtk_data）
-        self.pub = rospy.Publisher('/wtrtk_data', WTRTK, queue_size=10)
+        # 新增：GNGGA消息发布者（话题名：/fix）
+        self.fix_pub = rospy.Publisher('/fix', NavSatFix, queue_size=10)
+        # WTRTK消息发布者（保持不变）
+        self.wtrtk_pub = rospy.Publisher('/wtrtk_data', WTRTK, queue_size=10)
         
-        # 缓存串口数据
-        self.buffer = ""
+        self.buffer = ""  # 缓存串口数据，同时用于两种帧的解析
         
-        # 1Hz发布控制（使用事件锁控制频率）
+        # 线程与事件（保持不变，用于控制发布频率）
         self.publish_event = threading.Event()
         self.publish_thread = threading.Thread(target=self.publish_loop, daemon=True)
         self.publish_thread.start()
-        
-        # 启动串口读取线程
         self.read_thread = threading.Thread(target=self.read_serial, daemon=True)
         self.read_thread.start()
         
-        rospy.loginfo("WTRTK serial driver started")
+        rospy.loginfo("GNGGA + WTRTK serial driver started")
 
     def connect_serial(self):
         """连接串口设备"""
@@ -54,6 +54,70 @@ class WTRTKSerialDriver:
         except Exception as e:
             rospy.logerr(f"Failed to open serial port {self.port}: {str(e)}")
             return False
+    def parse_gngga(self, frame):
+        """解析$GNGGA帧，返回sensor_msgs/NavSatFix消息"""
+        if not frame.startswith("$GNGGA"):
+            return None
+        
+        # 分割帧头和校验位（与WTRTK解析逻辑一致）
+        star_pos = frame.find('*')
+        if star_pos == -1:
+            rospy.logwarn("Invalid GNGGA frame (no checksum)")
+            return None
+        
+        # 提取内容字段（$GNGGA,后到*前的部分）
+        content = frame[7:star_pos]
+        fields = content.split(',')
+        
+        # GNGGA标准格式包含14个字段（不含帧头和校验位）
+        if len(fields) < 14:
+            rospy.logwarn(f"Invalid GNGGA fields count: {len(fields)} (expected >=14)")
+            return None
+        
+        # 构造NavSatFix消息
+        fix_msg = NavSatFix()
+        fix_msg.header = Header()
+        fix_msg.header.stamp = rospy.Time.now()
+        fix_msg.header.frame_id = "gps"
+        
+        try:
+            # 解析经纬度（度分格式→十进制）
+            # 纬度：字段2（如"3032.04204"）+ 字段3（N/S）
+            lat_dms = fields[2]
+            lat_flag = fields[3]
+            latitude = self.dms_to_decimal(lat_dms, is_latitude=True)
+            if latitude is not None and lat_flag == 'S':
+                latitude = -latitude  # 南纬为负
+            
+            # 经度：字段4（如"12006.94560"）+ 字段5（E/W）
+            lon_dms = fields[4]
+            lon_flag = fields[5]
+            longitude = self.dms_to_decimal(lon_dms, is_latitude=False)
+            if longitude is not None and lon_flag == 'W':
+                longitude = -longitude  # 西经为负
+            
+            # 解析海拔（字段9：海拔值，字段10：单位，通常为M）
+            altitude = float(fields[9]) if fields[9] else 0.0
+            
+            # 定位状态（字段6：0=未定位，1=单点定位，2=差分定位，4=固定解，5=浮点解）
+            fix_status = int(fields[6]) if fields[6] else 0
+            
+            # 填充消息
+            fix_msg.latitude = latitude if latitude is not None else 0.0
+            fix_msg.longitude = longitude if longitude is not None else 0.0
+            fix_msg.altitude = altitude
+            fix_msg.status.status = fix_status  # 定位状态
+            fix_msg.status.service = 1  # 表示GPS服务
+            
+            #  covariance（可选，根据实际精度填充）
+            fix_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_APPROXIMATED
+            fix_msg.position_covariance = [0.1, 0, 0, 0, 0.1, 0, 0, 0, 1.0]  # 示例值
+            
+        except (ValueError, IndexError) as e:
+            rospy.logwarn(f"Failed to parse GNGGA fields: {str(e)}")
+            return None
+        
+        return fix_msg
     def dms_to_decimal(self, dms_str, is_latitude=True):
         """
         将度分格式（DDMM.MMMMM）转换为十进制格式（DD.DDDDD°）
@@ -147,9 +211,36 @@ class WTRTKSerialDriver:
             return None
         
         return msg
-
+    def publish_loop(self):
+        """1Hz频率发布GNGGA和WTRTK数据"""
+        last_fix = None
+        last_wtrtk = None
+        rate = rospy.Rate(1)  # 1Hz
+        while not rospy.is_shutdown():
+            self.publish_event.wait(timeout=1.0)
+            self.publish_event.clear()
+            
+            # 更新最新消息缓存
+            if hasattr(self, 'latest_fix'):
+                last_fix = self.latest_fix
+            if hasattr(self, 'latest_wtrtk'):
+                last_wtrtk = self.latest_wtrtk
+            
+            # 发布GNGGA解析结果
+            if last_fix:
+                last_fix.header.stamp = rospy.Time.now()
+                self.fix_pub.publish(last_fix)
+                rospy.logdebug(f"Published GNGGA (fix status: {last_fix.status.status})")
+            
+            # 发布WTRTK解析结果
+            if last_wtrtk:
+                last_wtrtk.header.stamp = rospy.Time.now()
+                self.wtrtk_pub.publish(last_wtrtk)
+                rospy.logdebug(f"Published WTRTK (fix status: {last_wtrtk.fix_status})")
+            
+            rate.sleep()
     def read_serial(self):
-        """持续读取串口数据并缓存，优化帧分割逻辑"""
+        """持续读取串口数据，同时解析GNGGA和WTRTK帧"""
         while not rospy.is_shutdown():
             if not self.ser or not self.ser.is_open:
                 rospy.logwarn("Serial port closed, reconnecting...")
@@ -158,58 +249,51 @@ class WTRTKSerialDriver:
                     continue
             
             try:
-                # 读取串口数据（非阻塞，一次最多读1024字节）
                 data = self.ser.read(1024)
                 if data:
-                    rospy.logdebug(f"Raw data: {data.hex()}")  # 打印十六进制原始数据（便于观察帧结构）
-                    rospy.logdebug(f"Decoded data: {data.decode('utf-8', errors='replace')}")  # 打印解码后的数据
-                    # 解码时忽略无效字符，避免乱码导致分割错误
+                    # 解码并缓存数据（保留无效字符替换，避免分割错误）
                     self.buffer += data.decode('utf-8', errors='replace')
                     
-                    # 只处理包含完整$WTRTK帧的缓存（以$开头，\r\n结尾）
-                    while '$WTRTK' in self.buffer and '\r\n' in self.buffer:
-                        # 找到当前帧的起始位置
-                        start_idx = self.buffer.find('$WTRTK')
-                        # 找到当前帧的结束位置（从起始位置后找\r\n）
-                        end_idx = self.buffer.find('\r\n', start_idx)
-                        if end_idx == -1:
-                            break  # 未找到完整帧尾，退出循环等待下一次数据
+                    # 循环处理缓存中的所有完整帧（同时支持GNGGA和WTRTK）
+                    while True:
+                        # 查找两种帧的起始位置
+                        gngga_start = self.buffer.find('$GNGGA')
+                        wtrtk_start = self.buffer.find('$WTRTK')
                         
-                        # 提取完整帧（从start_idx到end_idx，包含$和\r\n前的内容）
-                        frame = self.buffer[start_idx:end_idx]
-                        # 移除已处理的部分（保留剩余缓存）
-                        self.buffer = self.buffer[end_idx+2:]  # +2是跳过\r\n
+                        # 没有任何帧起始，退出循环
+                        if gngga_start == -1 and wtrtk_start == -1:
+                            break
                         
-                        # 解析帧
-                        parsed_msg = self.parse_wtrtk(frame)
-                        if parsed_msg:
-                            self.latest_msg = parsed_msg  # 缓存最新消息
-                            self.publish_event.set()  # 通知发布线程
+                        # 选择最早出现的帧进行处理
+                        if gngga_start != -1 and (wtrtk_start == -1 or gngga_start < wtrtk_start):
+                            # 处理GNGGA帧
+                            start_idx = gngga_start
+                            end_idx = self.buffer.find('\r\n', start_idx)
+                            if end_idx == -1:
+                                break  # 未找到帧尾，等待下一次数据
+                            frame = self.buffer[start_idx:end_idx]
+                            self.buffer = self.buffer[end_idx+2:]  # 移除已处理部分
+                            parsed_fix = self.parse_gngga(frame)
+                            if parsed_fix:
+                                self.latest_fix = parsed_fix  # 缓存最新GNGGA消息
+                                self.publish_event.set()
+                        else:
+                            # 处理WTRTK帧（复用原有逻辑）
+                            start_idx = wtrtk_start
+                            end_idx = self.buffer.find('\r\n', start_idx)
+                            if end_idx == -1:
+                                break
+                            frame = self.buffer[start_idx:end_idx]
+                            self.buffer = self.buffer[end_idx+2:]
+                            parsed_wtrtk = self.parse_wtrtk(frame)
+                            if parsed_wtrtk:
+                                self.latest_wtrtk = parsed_wtrtk  # 缓存最新WTRTK消息
+                                self.publish_event.set()
+            
             except Exception as e:
                 rospy.logerr(f"Serial read error: {str(e)}")
                 self.ser.close()
                 time.sleep(1)
-
-    def publish_loop(self):
-        """1Hz频率发布数据（即使无新数据也保持频率）"""
-        last_msg = None
-        rate = rospy.Rate(1)  # 1Hz
-        while not rospy.is_shutdown():
-            # 等待新数据或定时发布
-            self.publish_event.wait(timeout=1.0)
-            self.publish_event.clear()
-            
-            # 如果有新数据，更新缓存
-            if hasattr(self, 'latest_msg'):
-                last_msg = self.latest_msg
-            
-            # 发布最新数据（确保1Hz频率）
-            if last_msg:
-                last_msg.header.stamp = rospy.Time.now()  # 更新时间戳
-                self.pub.publish(last_msg)
-                rospy.logdebug(f"Published WTRTK data (fix status: {last_msg.fix_status})")
-            
-            rate.sleep()
 
     def run(self):
         """保持节点运行"""

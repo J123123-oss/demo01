@@ -33,11 +33,11 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 20   #下发电机理想转速rpm
-        self.base_speed = 20   #设置后退基础速度值  * 0.8 > * 1
+        self.motor_base = 15   #下发电机理想转速rpm
+        self.base_speed = 15   #设置后退基础速度值  * 0.8 > * 1
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 50*rate  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 30*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -92,13 +92,13 @@ class ServoDriveController:
                 "velocity_brush": 0
             },
             "FORWARD": {  # 前进状态
-                "velocity_up": self.motor_base * rate,
-                "velocity_low": -self.motor_base * rate,
+                "velocity_up": -self.motor_base * rate,
+                "velocity_low": self.motor_base * rate,
                 "velocity_brush": -80 * rate      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
-                "velocity_up": -self.motor_base * rate,
-                "velocity_low": self.motor_base * rate,
+                "velocity_up": self.motor_base * rate,
+                "velocity_low": -self.motor_base * rate,
                 "velocity_brush": 80 * rate      #1000 同向
             },
             "LOADING": {
@@ -108,11 +108,11 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": -80 * rate   #200
+                "velocity_brush": 80 * rate   #200
             },
             "UNLOADING":{
-                "velocity_up": -self.motor_base *rate,
-                "velocity_low": self.motor_base *rate,
+                "velocity_up": self.motor_base *rate,
+                "velocity_low": -self.motor_base *rate,
                 "velocity_brush": 80
             },
             "UPSTOP":{

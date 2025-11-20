@@ -14,7 +14,7 @@ class DigitalInputReader:
         # ROS parameters
         self.device_address = rospy.get_param('~device_address', 1)
         self.can_interface = rospy.get_param('~can_interface', 'can0')
-        self.update_rate = rospy.get_param('~update_rate', 10.0)  # Hz
+        self.update_rate = rospy.get_param('~update_rate', 20.0)  # Hz
         self.baudrate = rospy.get_param('~baudrate', 1000000)  # 默认1Mbps(手册值0x0b)
         self.request_baudrate = rospy.get_param('~request_baudrate', False)  # 是否设置波特率，设置1次，断电5秒后生效
         
