@@ -67,7 +67,6 @@ class ServoDriveController:
             "BACKWARD",  # 后退状态
             "START",  # 速度模式初始化并使能[3]
             "LOADING", # 进仓
-            "PAUSE", # 对向暂停，与进仓滚刷转速相反
             "UNLOADING", # 出仓
             "UPSTOP", # 上电机停
             "LOWSTOP", # 下电机停
@@ -75,6 +74,7 @@ class ServoDriveController:
             "PISTON_IN", #电缸缩进
             "CHARGE_OUT", #充电状态     [10]
             "RETURN_DOCK" #取消充电    [11]
+            "PAUSE", # 对向暂停，与进仓滚刷转速相反
         ]
         # 定义状态及其对应的速度配置
         self.status_config = {
@@ -95,12 +95,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -80 * rate      #-1000 同向
+                "velocity_brush": 80 * rate      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": 80 * rate      #1000 同向
+                "velocity_brush": -80 * rate      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -109,13 +109,13 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": -80 * rate   #200
+                "velocity_brush": 80 * rate   #-1000 同向
             },
             "PAUSE": {
                 #循环测试需要对向加入等待
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 80 * rate   #200
+                "velocity_brush": -80 * rate   #1000 同向
             },
             "UNLOADING":{
                 "velocity_up": 0,
@@ -350,9 +350,9 @@ class ServoDriveController:
                 "battery_current": self.battery_current, # 电池电流
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                "velocity_up": round(velocity_up * 20, 2),  # 保留两位小数，数值类型
-                "velocity_low": round(velocity_low * 20, 2),
-                "velocity_brush": round(velocity_brush * 12, 2),
+                "velocity_up": round(velocity_up * 20/24, 2),  # 保留两位小数，数值类型
+                "velocity_low": round(velocity_low * 20/24, 2),
+                "velocity_brush": round(velocity_brush, 2), # 20减速器，不用转换
                 "sensors_status": self.sensors_status,  # 超声波传感器状态
                 "device_status": {
                 "main_board": self.main_board,
@@ -811,7 +811,7 @@ class ServoDriveController:
             if self.current_status == self.status_list[1]:  # FORWARD
                 if msg.sensor_a and msg.sensor_c:
                     #清空自动流程状态
-                    threading.Timer(5.0, self.lock_motor).start()
+                    threading.Timer(0.1, self.lock_motor).start()
                     self.set_state("PAUSE")
                     self.complete_state = True
                     # self.initial_yaw = None  # 重置初始偏航角
@@ -819,7 +819,10 @@ class ServoDriveController:
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
                     rospy.loginfo("——————————————————————进仓完成——————————————————————")
-                    self.set_state("START")
+                    time.sleep(3)
+                    self.set_state("BACKWARD")
+                    self.progress = 10
+                    # self.set_state("START")
                     # 完成任务后关闭IMU
                     # self.stop_imu()
                 elif (msg.sensor_a and not msg.sensor_c):
@@ -845,7 +848,7 @@ class ServoDriveController:
         else: # 手动模式，仅在前进与后退中切换
             if self.current_status == self.status_list[1]:  # FORWARD
                 if msg.sensor_a and msg.sensor_c:
-                    threading.Timer(5.0, self.lock_motor).start()
+                    threading.Timer(0.1, self.lock_motor).start()
                     self.set_state("PAUSE")
                     time.sleep(1)
                     #清空自动流程状态
@@ -855,6 +858,9 @@ class ServoDriveController:
                     self.auto_step = None
                     self.elevator_stage = 0  # 重置电缸阶段
                     # self.stop_imu()
+                    time.sleep(3)
+                    self.set_state("BACKWARD")
+                    self.progress = 10
 
                 elif (msg.sensor_a and not msg.sensor_c):
                     self.set_state("LOWSTOP")
@@ -867,7 +873,7 @@ class ServoDriveController:
                 #     self.progress = 0
             elif self.current_status == self.status_list[2]:  # BACKWARD
                 if msg.sensor_b and msg.sensor_d:
-                    self.set_state("PAUSE")
+                    self.set_state("LOADING")
                     time.sleep(1)
                     #清空自动流程状态
                     self.complete_state = True
@@ -887,7 +893,7 @@ class ServoDriveController:
         if self.current_status == self.status_list[7]: #LOWSTOP 
                 #确保停到位
             if msg.sensor_c:
-                threading.Timer(5.0, self.lock_motor).start()
+                threading.Timer(0.1, self.lock_motor).start()
                 self.set_state("PAUSE")
                 # time.sleep(1)
                 #清空自动流程状态
@@ -900,7 +906,11 @@ class ServoDriveController:
                 # self.stop_imu()
 
                 rospy.loginfo("——————————————————————由LOWSTOP至进仓完成——————————————————————")
-                self.set_state("START")
+                time.sleep(3)
+                self.set_state("BACKWARD")
+                self.progress = 10
+
+                # self.set_state("START")
 
             else:
                 self.complete_state = False
@@ -914,7 +924,7 @@ class ServoDriveController:
         if self.current_status == self.status_list[6]: #UPSTOP 
                 #确保停到位
             if msg.sensor_a:
-                threading.Timer(5.0, self.lock_motor).start()
+                threading.Timer(0.1, self.lock_motor).start()
                 self.set_state("PAUSE")
                 # time.sleep(1)
                 #清空自动流程状态
@@ -926,7 +936,10 @@ class ServoDriveController:
                 self.elevator_stage = 0  # 重置电缸阶段
                 # self.stop_imu()
                 rospy.loginfo("——————————————————————由UPSTOP至进仓完成——————————————————————")
-                self.set_state("START")
+                time.sleep(3)
+                self.set_state("BACKWARD")
+                self.progress = 10
+                # self.set_state("START")
             else:
                 self.complete_state = False
             if msg.sensor_b:
@@ -1029,8 +1042,8 @@ class ServoDriveController:
             elif self.elevator_stage == 1:
                 elapsed = rospy.get_time() - self.elevator_start_time
                 
-                # 等待20秒完成电缸抬升 ,无电缸测试，使用1秒
-                if elapsed >= 1.0:
+                # 等待20秒完成电缸抬升 ,无电缸测试，使用0.1秒
+                if elapsed >= 0.1:
                     rospy.loginfo("开始配置电机速度模式...")
                     config = self.load_config()
                     
