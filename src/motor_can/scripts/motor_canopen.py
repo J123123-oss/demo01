@@ -61,6 +61,10 @@ class ServoDriveController:
         # 2. 心跳线程对象：存储后台线程实例
         self.heartbeat_thread = None
 
+        # 传感器A计数器
+        self.last_sensor_a = False
+        self.sensor_a_count = 0
+
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态[默认状态]
@@ -729,6 +733,10 @@ class ServoDriveController:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
+        # 记录触发sensor_a的次数
+        if self.last_sensor_a == False and msg.sensor_a == True:
+            self.sensor_a_count += 1
+            rospy.loginfo("触发次数: %d", self.sensor_a_count)
         
         if self.auto_mode and self.current_status == "RETURN_DOCK": 
             #回仓
@@ -950,6 +958,9 @@ class ServoDriveController:
                 time.sleep(3)
                 self.set_state("FORWARD")
                 self.progress = 60
+        #记录触发次数
+        self.last_sensor_a = msg.sensor_a
+        
 
         # if self.current_status == self.status_list[4]:  # LOADING 未使用
         # # if self.current_status == "UNLOADING" and self.side_detected:  # 边缘LOADING、UNLOADING
@@ -1103,8 +1114,8 @@ class ServoDriveController:
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
-                rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
-                rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
+                # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
+                # rospy.loginfo(f"上轮速度: {left_speed}, 下轮速度: {right_speed}")
                 
                 self.set_target_velocity(3, left_speed)
                 self.set_target_velocity(2, right_speed)
