@@ -33,11 +33,12 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 10   #下发电机理想转速rpm
-        self.base_speed = 10   #设置后退基础速度值  * 0.8 > * 1
+        self.motor_base = 30   #下发电机理想转速rpm
+        self.base_speed = 30   #设置后退基础速度值  * 0.8 > * 1
+        self.brush_base_speed = 150 * 20 # 未加减速器的rpm
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 20*rate  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 60*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -95,12 +96,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": 80 * rate      #-1000 同向
+                "velocity_brush": self.brush_base_speed      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": -80 * rate      #1000 同向
+                "velocity_brush": -self.brush_base_speed      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -109,18 +110,18 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 80 * rate   #-1000 同向
+                "velocity_brush": self.brush_base_speed   #-1000 同向
             },
             "PAUSE": {
                 #循环测试需要对向加入等待
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": -80 * rate   #1000 同向
+                "velocity_brush": -self.brush_base_speed   #1000 同向
             },
             "UNLOADING":{
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 80 * rate
+                "velocity_brush": self.brush_base_speed
             },
             "UPSTOP":{
                 "velocity_up": 0,
@@ -209,7 +210,7 @@ class ServoDriveController:
         self.pid_kp = 80   # 降低比例增益减少振荡             原100
         self.pid_ki = 0  # 提高积分增益增强对持续偏差的纠正   1.5
         self.pid_kd = 20   # 大幅提高微分增益抑制快速变化       20   10 
-        self.pid_correction_max = 80  # 放宽输出限制        200   150
+        self.pid_correction_max = 80  # 放宽输出限制        200   80
 
 
         self.progress = 0   # 进度百分比，0-100

@@ -52,9 +52,11 @@ class BatteryMonitor:
         try:
             # 1. 总电压 (2字节, 单位10mV)
             status_msg.total_voltage = ((data[0] << 8) | data[1]) * 0.01  # 转换为伏特(V)
+            print("status_msg.total_voltage:",status_msg.total_voltage)
             
             # 2. 电流 (2字节, 带符号处理)
             status_msg.current = self.parse_current(data[2:4])
+            print("status_msg.current:",status_msg.current)
             
             # 3. 容量信息 (4字节)
             status_msg.remaining_capacity = ((data[4] << 8) | data[5]) * 0.01  # 转换为安时(Ah)
@@ -98,7 +100,7 @@ class BatteryMonitor:
             
             # 发布完整状态消息
             self.status_pub.publish(status_msg)
-            rospy.loginfo("Battery status published successfully")
+            # rospy.loginfo("Battery status published successfully")
             
         except IndexError as e:
             rospy.logerr(f"数据解析错误: 响应长度不足 ({len(data)} bytes)")
@@ -162,7 +164,7 @@ class BatteryMonitor:
 
 if __name__ == '__main__':
     rospy.init_node('battery_monitor')
-    port = rospy.get_param('~serial_port', '/dev/ttyUSB1')
+    port = rospy.get_param('~serial_port', '/dev/ttyUSB0')
     monitor = BatteryMonitor(port)
     
     try:
