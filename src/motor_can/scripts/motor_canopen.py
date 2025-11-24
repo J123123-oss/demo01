@@ -64,6 +64,7 @@ class ServoDriveController:
         # 传感器A计数器
         self.last_sensor_a = False
         self.sensor_a_count = 0
+        self.last_sensor_time = 0
 
         #设置状态列表
         self.status_list = [
@@ -735,8 +736,10 @@ class ServoDriveController:
             self.sensors_status &= ~0x08
         # 记录触发sensor_a的次数
         if self.last_sensor_a == False and msg.sensor_a == True:
-            self.sensor_a_count += 1
-            rospy.loginfo("触发次数: %d", self.sensor_a_count)
+            # 5秒内只记录一次
+            if(time.time() - self.last_sensor_time > 5):
+                self.sensor_a_count += 1
+                rospy.loginfo("触发次数: %d", self.sensor_a_count)
         
         if self.auto_mode and self.current_status == "RETURN_DOCK": 
             #回仓
@@ -960,6 +963,7 @@ class ServoDriveController:
                 self.progress = 60
         #记录触发次数
         self.last_sensor_a = msg.sensor_a
+        self.last_sensor_time = time.time()
         
 
         # if self.current_status == self.status_list[4]:  # LOADING 未使用
