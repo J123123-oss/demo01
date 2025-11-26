@@ -18,7 +18,7 @@ STATE_WAITING_RELAY = 3
 
 class BatteryRelayNode:
     def __init__(self):
-        rospy.init_node('battery_imu_node')
+        rospy.init_node('battery_relay_node')
         
         # 时间阈值管理
         self.last_battery_sent = 0
@@ -85,6 +85,8 @@ class BatteryRelayNode:
         # 创建发布器
         self.battery_pub = rospy.Publisher('/battery_status', BatteryStatus, queue_size=10)
         self.relay_status_pub = rospy.Publisher('/relay_status', Bool, queue_size=10)
+        # 当节点因超时自动关闭继电器时，通过此topic发布标志位（Bool）
+        self.relay_auto_off_pub = rospy.Publisher('/relay_auto_off', Bool, queue_size=1)
         self.temperature_pub = rospy.Publisher('/control_temperature', Float32, queue_size=10)
         
         # ROS服务
@@ -93,6 +95,11 @@ class BatteryRelayNode:
         
         # 设置循环速率
         self.rate = rospy.Rate(100)  # 100Hz
+
+        # 继电器自动关闭控制：超过此秒数未手动关闭则自动关闭（默认2.5小时）
+        self.relay_max_on_seconds = rospy.get_param('~relay_max_on_seconds', 2.5 * 3600)
+        self.relay_on_time = None  # 存储最近一次被开启的时间戳
+        self.relay_auto_shutdown_flag = False  # 当节点因超时自动关闭继电器时置为True
         
         # 电池温度数据
         self.current_temperatures = []
@@ -295,6 +302,17 @@ class BatteryRelayNode:
                 status_msg = Bool()
                 status_msg.data = bool(self.current_relay_state)
                 self.relay_status_pub.publish(status_msg)
+                # 成功开启时记录开启时间，成功关闭时清除计时器
+                if enable:
+                    self.relay_on_time = time.time()
+                    # 手动开启，清除自动关闭标志并发布False
+                    self.relay_auto_shutdown_flag = False
+                    try:
+                        self.relay_auto_off_pub.publish(Bool(data=False))
+                    except Exception:
+                        pass
+                else:
+                    self.relay_on_time = None
                 return True
             else:
                 rospy.logwarn(f"继电器命令发送失败，重试 {attempt + 1}/{max_retries}")
@@ -375,6 +393,26 @@ class BatteryRelayNode:
         rospy.loginfo("节点主循环开始运行")
         while not rospy.is_shutdown():
             current_time = time.time()
+            # 自动关闭检测：继电器长时间处于开启状态时自动关闭并设置标志位
+            try:
+                if self.current_relay_state and self.relay_on_time is not None:
+                    elapsed = current_time - self.relay_on_time
+                    if elapsed >= float(self.relay_max_on_seconds):
+                        rospy.logwarn(f"继电器已开启 {elapsed:.0f}s (> {self.relay_max_on_seconds}s)，执行自动关闭")
+                        # 尝试自动关闭继电器
+                        auto_closed = self.enable_relay(False)
+                        if auto_closed:
+                            self.relay_auto_shutdown_flag = True
+                            try:
+                                self.relay_auto_off_pub.publish(Bool(data=True))
+                            except Exception:
+                                pass
+                            rospy.loginfo("继电器因超时已自动关闭，relay_auto_shutdown_flag已置位")
+                        else:
+                            rospy.logerr("继电器自动关闭失败，稍后将重试")
+                            # 若关闭失败，不清除relay_on_time，以便下次循环继续尝试
+            except Exception as e:
+                rospy.logwarn(f"自动关闭检测错误: {e}")
             
             # === 优先处理串口数据读取 ===
             self.read_serial_data()
