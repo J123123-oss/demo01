@@ -18,7 +18,7 @@ STATE_WAITING_RELAY = 3
 
 class BatteryRelayNode:
     def __init__(self):
-        rospy.init_node('battery_imu_node')
+        rospy.init_node('battery_relay_node')
         
         # 时间阈值管理
         self.last_battery_sent = 0
