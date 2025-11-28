@@ -1,7 +1,7 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
-<!-- <arg name="robot_ID" default="Erenhot_Baihuiyuan" /> -->
-<arg name="robot_ID" default="GF-HZ-OPI3B" />
+<arg name="robot_ID" default="Erenhot_Baihuiyuan" />
+<!-- <arg name="robot_ID" default="GF-HZ-OPI3B" /> -->
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
     </node>
     <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
@@ -20,7 +20,7 @@
     <node pkg="serial_comms" type="relay_battery.py" name="relay_battery" output="screen" >
     <!-- 高温阈值  |    低温阈值  |    检查间隔 -->
         <param name="~temperature_threshold_high" value="5.0"/>
-        <param name="~temperature_threshold_low" value="3.0"/>
+        <param name="~temperature_threshold_low" value="-15.0"/>
         <param name="~battery_check_interval" value="10"/>
         <param name="~relay_check_interval" value="11"/>
     </node>

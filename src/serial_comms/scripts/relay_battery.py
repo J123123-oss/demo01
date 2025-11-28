@@ -468,7 +468,8 @@ class BatteryRelayNode:
                 # 使用锁保护串口访问
                 with self.serial_lock:
                     self.battery_buffer.clear()
-                    self.ser.write(b'\x00')  # 清除缓存
+                    # self.ser.write(b'\x00')  # 清除缓存
+                    self.ser.write(self.REQUEST_BASIC_FRAME)
                     time.sleep(0.01)
                     self.ser.write(self.REQUEST_BASIC_FRAME)
                 rospy.logdebug("电池查询指令发送成功")

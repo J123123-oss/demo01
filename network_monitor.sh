@@ -15,10 +15,10 @@ WIFI_INTERFACE="wlan0"
 CELLULAR_INTERFACE="ppp0"
 CELL_RECONNECT_CHECK=1
 # WiFi热点信息
-# WIFI_SSID="磅房1"
-WIFI_SSID="GiiFen-5G"
-# WIFI_PASSWORD="88888888"
-WIFI_PASSWORD="giifen666666"
+WIFI_SSID="磅房1"
+# WIFI_SSID="GiiFen-5G"
+WIFI_PASSWORD="88888888"
+# WIFI_PASSWORD="giifen666666"
 
 # 启动日志
 echo "$(date +'%Y-%m-%d %H:%M:%S') - 保守网络切换脚本启动（优先4G）..." >> "$LOG_FILE"
