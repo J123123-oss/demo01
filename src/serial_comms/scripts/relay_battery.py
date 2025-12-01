@@ -14,7 +14,7 @@ import threading
 # 状态常量
 STATE_READY = 0
 STATE_WAITING_BATTERY = 1
-STATE_WAITING_RELAY = 3
+STATE_WAITING_RELAY = 2
 
 class BatteryRelayNode:
     def __init__(self):
@@ -24,18 +24,19 @@ class BatteryRelayNode:
         self.last_battery_sent = 0
         self.last_relay_check = 0
         self.battery_buffer = bytearray()
+        self.relay_response_buffer = None  # 新增：存储继电器响应
         self.high_temp_triggered = False  # 高温触发标志
         self.low_temp_triggered = False   # 低温触发标志
         
         # 温度控制参数
         self.temperature_threshold_high = rospy.get_param('~temperature_threshold_high', 5.0)  # 高温阈值
-        self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 3.0)    # 低温阈值
-        self.battery_check_interval = rospy.get_param('~battery_check_interval', 5.0)             # 电池检查间隔
-        self.relay_check_interval = rospy.get_param('~relay_check_interval', 6.1)             # 继电器检查间隔
+        self.temperature_threshold_low = rospy.get_param('~temperature_threshold_low', 0.0)    # 低温阈值
+        self.battery_check_interval = rospy.get_param('~battery_check_interval', 8.0)             # 电池检查间隔
+        self.relay_check_interval = rospy.get_param('~relay_check_interval', 10.0)             # 继电器检查间隔
         
         # 获取串口参数
         port = rospy.get_param('~serial_port', '/dev/Battery-Relay')
-        baudrate = rospy.get_param('~baudrate', 115200)
+        baudrate = rospy.get_param('~baudrate', 115200)  
         self.relay_address = rospy.get_param('~relay_address', 0x02)
         
         # 添加串口访问锁，避免并发访问冲突
@@ -121,11 +122,12 @@ class BatteryRelayNode:
                 stopbits=serial.STOPBITS_ONE,
                 timeout=0.05
             )
-            rospy.loginfo(f"串口连接成功: {port}")
+            rospy.loginfo(f"串口连接成功: {port} (波特率: {baudrate})")
             return True
         except Exception as e:
             rospy.logerr(f"串口连接失败: {e}")
             return False
+
     def calculate_crc(self, data):
         """Modbus CRC16校验计算"""
         crc = 0xFFFF
@@ -138,6 +140,7 @@ class BatteryRelayNode:
                 else:
                     crc >>= 1
         return struct.pack('<H', crc)  
+
     def calculate_checksum(self, check_bytes):
         """
         计算校验码（不包含命令码03）：校验字节总和 → 取反+1（16位）
@@ -250,19 +253,17 @@ class BatteryRelayNode:
             return False
         
     def send_relay_command(self, command_data):
-        """发送继电器命令"""
+        """发送继电器命令（内部使用，带独占锁）"""
         try:
-            # 使用锁保护串口访问
-            with self.serial_lock:
-                crc = self.calculate_crc(command_data)
-                full_command = command_data + crc
-                self.ser.write(full_command)
-                rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
-                
-                # 等待响应
-                time.sleep(0.05)
-                response = self.ser.read(8)
-                
+            crc = self.calculate_crc(command_data)
+            full_command = command_data + crc
+            self.ser.write(full_command)
+            rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
+            
+            # 延长等待时间
+            time.sleep(0.2)
+            response = self.ser.read(8)
+            
             if len(response) > 0:
                 rospy.loginfo("接收继电器响应: %s", ' '.join(['%02X' % b for b in response]))
                 if len(response) >= 7 and response[:6] == command_data:
@@ -273,29 +274,34 @@ class BatteryRelayNode:
             return False
 
     def enable_relay(self, enable=True, current_temp=None):
-        """开启或关闭继电器（仅限白天6:00-17:00可开启）"""
-        # 时间限制：只有6:00-17:00允许开启
+        """开启或关闭继电器（仅限白天6:00-16:00可开启）- 优化独占串口"""
+        # 时间限制：只有6:00-16:00允许开启
         if enable:
             now = datetime.datetime.now()
-            # 检查是否在允许的常规时段（6:00-17:00）
-            in_regular_hours = 6 <= now.hour < 17
+            # 检查是否在允许的常规时段（6:00-16:00）
+            in_regular_hours = 6 <= now.hour < 16
             # 极端低温判断（当前温度＜-15℃时忽略时间限制）
             is_extreme_low = current_temp is not None and current_temp < -15
 
             if not in_regular_hours and not is_extreme_low:
-                rospy.logwarn("当前时间不在允许开启继电器的时段（6:00-17:00）且非极端低温（＜-15℃），请求被拒绝")
+                rospy.logwarn("当前时间不在允许开启继电器的时段（6:00-16:00）且非极端低温（＜-15℃），请求被拒绝")
                 return False
 
-        max_retries = 10
+        max_retries = 10  # 避免串口过载10>>>5
         for attempt in range(max_retries):
-            if enable:
-                command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
-                rospy.loginfo("发送继电器开启命令")
-            else:
-                command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0x00, 0x00])
-                rospy.loginfo("发送继电器关闭命令")
+            # 强制等待串口空闲
+            time.sleep(0.1)
             
-            success = self.send_relay_command(command_data)
+            with self.serial_lock:  # 独占串口资源
+                if enable:
+                    command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
+                    rospy.loginfo("发送继电器开启命令")
+                else:
+                    command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0x00, 0x00])
+                    rospy.loginfo("发送继电器关闭命令")
+                
+                success = self.send_relay_command(command_data)
+            
             if success:
                 self.current_relay_state = enable
                 # 发布继电器状态
@@ -316,37 +322,47 @@ class BatteryRelayNode:
                 return True
             else:
                 rospy.logwarn(f"继电器命令发送失败，重试 {attempt + 1}/{max_retries}")
-                time.sleep(0.1)  # 等待后重试
         
         rospy.logerr("继电器命令发送失败，已达到最大重试次数")
         return False
 
     def read_relay_status(self):
-        """读取继电器状态，失败时返回上一次保存的值"""
+        """优化继电器状态读取：增加等待时间，分离响应处理"""
         command_data = bytes([self.relay_address, 0x01, 0x00, 0x00, 0x00, 0x08])
         # 保存当前状态作为备选
         last_known_state = self.current_relay_state
-        
+        self.relay_response_buffer = None  # 清空旧响应
+
         try:
             # 使用锁保护串口访问
             with self.serial_lock:
                 crc = self.calculate_crc(command_data)
                 full_command = command_data + crc
                 self.ser.write(full_command)
+                rospy.loginfo(f"发送继电器状态查询: {' '.join(['%02X' % b for b in full_command])}")
                 
-                time.sleep(0.01)
-                response = self.ser.read(8)
+                # 延长等待时间，确保响应接收
+                time.sleep(0.2)  # 从0.1秒增加到0.2秒
+                # 主动读取串口数据
+                avail = self.ser.in_waiting
+                if avail > 0:
+                    data = self.ser.read(avail)
+                    # 处理继电器响应
+                    self.process_relay_data(data)
+
+            # 检查是否捕获到继电器响应
+            if self.relay_response_buffer:
+                response = self.relay_response_buffer
                 rospy.loginfo("接收继电器状态响应: %s", ' '.join(['%02X' % b for b in response]))
                 
-            if response and len(response) >= 6:
-                if response[0] == self.relay_address and response[1] == 0x01:
+                if len(response) >= 4 and response[0] == self.relay_address and response[1] == 0x01:
                     byte_count = response[2]
                     if byte_count >= 1:
                         status_byte = response[3]
                         relay_status = (status_byte & 0x01) != 0
                         self.current_relay_state = relay_status
                         return relay_status
-            
+
             # 如果响应解析失败，返回上一次已知状态
             rospy.logwarn("继电器状态解析失败，使用上一次已知状态")
             return last_known_state
@@ -355,6 +371,33 @@ class BatteryRelayNode:
             rospy.logerr(f"读取继电器状态错误: {e}，使用上一次已知状态")
             # 发生异常时返回上一次已知状态
             return last_known_state
+
+    def process_relay_data(self, data):
+        """专门处理继电器响应数据"""
+        # 继电器响应格式：地址(02) + 功能码(01) + 字节数(01) + 状态 + CRC(2字节)
+        relay_response_prefix = bytes([self.relay_address, 0x01])
+        if relay_response_prefix in data:
+            # 提取完整继电器响应（8字节）
+            idx = data.find(relay_response_prefix)
+            if idx + 8 <= len(data):
+                self.relay_response_buffer = data[idx:idx+8]
+
+    def process_battery_data(self, data):
+        """处理电池数据"""
+        for byte in data:
+            byte_val = byte if isinstance(byte, int) else ord(byte)
+            if byte_val == 0xDD:
+                # 1. 若缓冲区有旧数据，先尝试解析
+                if len(self.battery_buffer) > 0:
+                    rospy.loginfo(f"电池缓冲区当前长度: {len(self.battery_buffer)}，尝试解析旧数据")
+                    self.process_battery_buffer()  # 尝试处理旧数据
+                    rospy.logwarn("电池缓冲区已有数据，已尝试解析，现在处理新帧")
+                
+                # 2. 清空缓冲区并添加新帧头
+                self.battery_buffer.clear()
+                self.battery_buffer.append(byte_val)
+            elif len(self.battery_buffer) > 0 and self.battery_buffer[0] == 0xDD and len(self.battery_buffer) < 50:
+                self.battery_buffer.append(byte_val)
 
     def temperature_based_control(self):
         """基于温度控制继电器，每种情况只触发一次，温度恢复后可再次触发"""
@@ -448,16 +491,16 @@ class BatteryRelayNode:
                 
                 # 处理继电器温度控制（最低优先级）
                 elif current_time - self.last_relay_check >= self.relay_check_interval:
-                    latest_relay_status = self.read_relay_status()
-                    # if latest_relay_status is None:
-                        # rospy.logwarn("读取继电器状态失败，当前旧状态")
-                    self.temperature_based_control()
-                    self.last_relay_check = current_time
-                    
-                    # 定期输出统计信息
-                    if self.battery_query_count > 0:
-                        battery_success_rate = (self.battery_success_count / self.battery_query_count) * 100
-                        rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
+                    # 仅当无电池操作时才查询继电器
+                    if self.current_state == STATE_READY:
+                        latest_relay_status = self.read_relay_status()
+                        self.temperature_based_control()
+                        self.last_relay_check = current_time
+                        
+                        # 定期输出统计信息
+                        if self.battery_query_count > 0:
+                            battery_success_rate = (self.battery_success_count / self.battery_query_count) * 100
+                            rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
             
             self.rate.sleep()
 
@@ -510,44 +553,21 @@ class BatteryRelayNode:
             return False
 
     def read_serial_data(self):
-        """改进的串口读取，确保及时处理所有数据"""
+        """改进的串口读取，分离处理继电器和电池数据"""
         try:
             if self.ser and self.ser.is_open:
                 # 使用锁保护串口访问
                 with self.serial_lock:
-                    # 多次读取直到清空缓冲区
-                    for _ in range(3):  # 最多读取3次
-                        avail = self.ser.in_waiting
-                        if avail == 0:
-                            break
-                            
+                    avail = self.ser.in_waiting
+                    if avail > 0:
                         data = self.ser.read(avail)
-                        if data:
-                            # 打印原始数据
-                            hex_str = ' '.join(['%02X' % b for b in data])
-                            rospy.loginfo(f"收到485原始数据: {hex_str}")
+                        # 打印原始数据
+                        hex_str = ' '.join(['%02X' % b for b in data])
+                        rospy.loginfo(f"收到485原始数据: {hex_str}")
 
-                        for byte in data:
-                            byte_val = byte if isinstance(byte, int) else ord(byte)
-
-                            # 只保留电池分流逻辑
-                            if byte_val == 0xDD:
-                                # 1. 若缓冲区有旧数据，先尝试解析
-                                if len(self.battery_buffer) > 0:
-                                    rospy.loginfo(f"电池缓冲区当前长度: {len(self.battery_buffer)}，尝试解析旧数据")
-                                    self.process_battery_buffer()  # 尝试处理旧数据
-                                    rospy.logwarn("电池缓冲区已有数据，已尝试解析，现在处理新帧")
-                                
-                                # 2. 清空缓冲区并添加新帧头
-                                self.battery_buffer.clear()
-                                self.battery_buffer.append(byte_val)
-                            elif len(self.battery_buffer) > 0 and self.battery_buffer[0] == 0xDD and len(self.battery_buffer) < 50:
-                                self.battery_buffer.append(byte_val)
-                            else:
-                                rospy.loginfo(f"收到其他类型数据: {byte_val:02X}")
-                        
-                        # 短暂休息避免过度占用CPU
-                        time.sleep(0.001)
+                        # 分离处理继电器和电池数据
+                        self.process_relay_data(data)  # 优先处理继电器响应
+                        self.process_battery_data(data)  # 处理电池数据
                     
         except serial.SerialException as e:
             rospy.logerr(f"串口读取异常: {e}")
