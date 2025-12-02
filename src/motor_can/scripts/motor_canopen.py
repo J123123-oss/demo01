@@ -109,7 +109,7 @@ class ServoDriveController:
             "UNLOADING":{
                 "velocity_up": -self.motor_base *rate,
                 "velocity_low": self.motor_base *rate,
-                "velocity_brush": 0
+                "velocity_brush": 1600 * rate   #出仓同向
             },
             "UPSTOP":{
                 "velocity_up": 0,
