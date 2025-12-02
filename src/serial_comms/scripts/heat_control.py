@@ -6,30 +6,40 @@ import threading
 import struct
 import time
 from std_msgs.msg import Bool, String
-# 导入ROS服务消息类型
 from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
+import datetime
+
 
 class RelayController:
     def __init__(self):
         # ROS参数
         self.port = rospy.get_param('~port', '/dev/Battery-Relay')
         self.baudrate = rospy.get_param('~baudrate', 115200)
-        self.slave_address = rospy.get_param('~slave_address', 0x02)
+        self.relay_address = rospy.get_param('~relay_address', 0x02)
         self.timeout = rospy.get_param('~timeout', 1.0)
         
         # 串口连接
         self.serial_conn = None
         self.lock = threading.Lock()
+        self.serial_lock = threading.Lock()
+        self.current_relay_state = False
+        self.current_temperatures = []
         
-        # ROS发布器和订阅器
+        # ROS发布器
         self.status_pub = rospy.Publisher('relay_status', Bool, queue_size=10)
         self.debug_pub = rospy.Publisher('relay_debug', String, queue_size=10)
+        self.relay_auto_off_pub = rospy.Publisher('relay_auto_off', Bool, queue_size=1)
         
+        # ROS服务
         rospy.Service('~enable_relay', SetBool, self.enable_relay_callback)
         rospy.Service('~get_status', Trigger, self.get_status_callback)
         
         # 初始化串口
         self.init_serial()
+        
+        # 继电器计时
+        self.relay_on_time = None
+        self.relay_auto_shutdown_flag = False
         
         # 启动状态监控线程
         self.monitor_thread = threading.Thread(target=self.status_monitor)
@@ -65,7 +75,8 @@ class RelayController:
                     crc ^= 0xA001
                 else:
                     crc >>= 1
-        return crc
+        # 返回字节形式的CRC（小端序）
+        return struct.pack('<H', crc)
     
     def send_modbus_command(self, command_data):
         """发送Modbus命令并接收响应"""
@@ -75,9 +86,9 @@ class RelayController:
         
         with self.lock:
             try:
-                # 添加CRC校验
-                crc = self.calculate_crc(command_data)
-                command_data += struct.pack('<H', crc)
+                # 添加CRC校验（返回的是字节）
+                crc_bytes = self.calculate_crc(command_data)
+                command_data += crc_bytes
                 
                 # 发送命令
                 self.serial_conn.write(command_data)
@@ -96,44 +107,90 @@ class RelayController:
                 rospy.logerr("Communication error: %s", str(e))
                 return None
     
-    def enable_relay(self, enable=True):
-        """开启或关闭继电器"""
-        # 功能码 0x05: 写单个线圈
-        # 地址 0x0000: 线圈地址
-        # 值: 0xFF00 开启, 0x0000 关闭
+    def send_relay_command(self, command_data):
+        """发送继电器命令（使用serial_conn）"""
+        try:
+            # 计算CRC并转换为字节
+            crc_bytes = self.calculate_crc(command_data)
+            full_command = command_data + crc_bytes
+            
+            self.serial_conn.write(full_command)
+            self.serial_conn.flush()
+            
+            rospy.loginfo("发送继电器命令: %s", ' '.join(['%02X' % b for b in full_command]))
+            
+            # time.sleep(0.2)
+            response = self.serial_conn.read(8)
+            
+            if len(response) > 0:
+                rospy.loginfo("接收继电器响应: %s", ' '.join(['%02X' % b for b in response]))
+                if len(response) >= 6 and response[:6] == command_data:
+                    return True
+            return False
+        except Exception as e:
+            rospy.logerr(f"继电器通信错误: {e}")
+            return False
+    
+    def enable_relay(self, enable=True, current_temp=None):
+        """控制继电器"""
         if enable:
-            command_data = bytes([self.slave_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
-        else:
-            command_data = bytes([self.slave_address, 0x05, 0x00, 0x00, 0x00, 0x00])
+            now = datetime.datetime.now()
+            in_regular_hours = 6 <= now.hour < 16
+            is_extreme_low = current_temp is not None and current_temp < -15
+
+            if not in_regular_hours and not is_extreme_low:
+                rospy.logwarn("当前时间不在允许开启继电器的时段且非极端低温，请求被拒绝")
+                return False
+
+        max_retries = 10  # 减少重试次数
+        for attempt in range(max_retries):
+            with self.serial_lock:
+                # 等待总线空闲
+                time.sleep(0.1)
+                
+                if enable:
+                    command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0xFF, 0x00])
+                    rospy.loginfo("发送继电器开启命令")
+                else:
+                    command_data = bytes([self.relay_address, 0x05, 0x00, 0x00, 0x00, 0x00])
+                    rospy.loginfo("发送继电器关闭命令")
+                
+                success = self.send_relay_command(command_data)
+                
+                if success:
+                    self.current_relay_state = enable
+                    self.status_pub.publish(Bool(data=enable))
+                    
+                    if enable:
+                        self.relay_on_time = time.time()
+                        self.relay_auto_shutdown_flag = False
+                        self.relay_auto_off_pub.publish(Bool(data=False))
+                    else:
+                        self.relay_on_time = None
+                    
+                    return True
+            
+            rospy.logwarn(f"继电器命令发送失败，重试 {attempt + 1}/{max_retries}")
+            time.sleep(0.5)
         
-        response = self.send_modbus_command(command_data)
-        
-        if response and len(response) >= 7:
-            # 验证响应是否正确
-            expected_response = command_data  # 写线圈命令的响应应该与发送的命令相同
-            if response[:6] == expected_response:
-                return True
-        
+        rospy.logerr("继电器命令发送失败，已达到最大重试次数")
         return False
     
     def read_relay_status(self):
         """读取继电器状态"""
         # 功能码 0x01: 读线圈状态
-        # 地址 0x0000: 起始地址
-        # 数量 0x0008: 读取8个线圈
-        command_data = bytes([self.slave_address, 0x01, 0x00, 0x00, 0x00, 0x08])
+        command_data = bytes([self.relay_address, 0x01, 0x00, 0x00, 0x00, 0x01])  # 只读取1个线圈
         
         response = self.send_modbus_command(command_data)
         
         if response and len(response) >= 5:
             # 响应格式: [地址, 功能码, 字节数, 数据..., CRC]
-            if response[0] == self.slave_address and response[1] == 0x01:
+            if response[0] == self.relay_address and response[1] == 0x01:
                 byte_count = response[2]
                 if byte_count >= 1:
-                    # 第一个字节包含前8个线圈的状态
+                    # 第一个线圈状态（bit 0）
                     status_byte = response[3]
-                    # 我们关心的是第四个线圈 (bit 3, 从0开始计数)
-                    relay_status = (status_byte & 0x08) != 0
+                    relay_status = (status_byte & 0x01) != 0
                     return relay_status
         
         return None
@@ -167,12 +224,13 @@ class RelayController:
     
     def status_monitor(self):
         """状态监控线程，定期发布继电器状态"""
-        rate = rospy.Rate(1)  # 1Hz
+        rate = rospy.Rate(0.5)  # 降低频率
         
         while not rospy.is_shutdown():
             if self.serial_conn:
                 status = self.read_relay_status()
                 if status is not None:
+                    self.current_relay_state = status
                     # 发布状态
                     status_msg = Bool()
                     status_msg.data = status
@@ -187,7 +245,7 @@ class RelayController:
     
     def run_test_sequence(self):
         """运行测试序列"""
-        while True:
+        while not rospy.is_shutdown():
             rospy.loginfo("Starting relay test sequence...")
             
             # 测试1: 读取状态
@@ -195,27 +253,18 @@ class RelayController:
             status = self.read_relay_status()
             rospy.loginfo("Initial relay status: %s", "ON" if status else "OFF")
             
-            # 测试2: 开启继电器
-            rospy.loginfo("Test 2: Enabling relay")
-            if self.enable_relay(True):
-                rospy.loginfo("Relay enabled successfully")
-                time.sleep(1)
-                status = self.read_relay_status()
-                rospy.loginfo("Relay status after enable: %s", "ON" if status else "OFF")
-            else:
-                rospy.logerr("Failed to enable relay")
-            
-            # 测试3: 关闭继电器
+            # 测试2: 关闭继电器
             rospy.loginfo("Test 3: Disabling relay")
             if self.enable_relay(False):
                 rospy.loginfo("Relay disabled successfully")
-                time.sleep(1)
+                time.sleep(2)
                 status = self.read_relay_status()
                 rospy.loginfo("Relay status after disable: %s", "ON" if status else "OFF")
             else:
                 rospy.logerr("Failed to disable relay")
             
             rospy.loginfo("Relay test sequence completed")
+            time.sleep(5)  # 测试间隔
 
 def main():
     rospy.init_node('relay_controller', anonymous=True)

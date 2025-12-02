@@ -35,6 +35,7 @@ class ServoDriveController:
         self.motor_driver =True # 电机驱动器状态MQTT
         self.motor_base = 350
         self.base_speed = 17000   #设置后退基础速度值  * 0.8 > * 1
+        self.brush_speed = 1600 * rate # 设置滚刷速度
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
         self.speed_pluse_max = 25840  #(380*rate)  #23800 #32467      #23800   # 17000
@@ -90,12 +91,12 @@ class ServoDriveController:
             "FORWARD": {  # 前进状态
                 "velocity_up": self.motor_base * rate,
                 "velocity_low": -self.motor_base * rate,
-                "velocity_brush": -1600 * rate      #-1000 同向
+                "velocity_brush": -self.brush_speed      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -1600 * rate      #1000 同向
+                "velocity_brush": -self.brush_speed      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -104,12 +105,12 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": -1600 * rate   #1600
+                "velocity_brush": -self.brush_speed   #1600
             },
             "UNLOADING":{
                 "velocity_up": -self.motor_base *rate,
                 "velocity_low": self.motor_base *rate,
-                "velocity_brush": 1600 * rate   #出仓同向
+                "velocity_brush": self.brush_speed   #出仓同向
             },
             "UPSTOP":{
                 "velocity_up": 0,
@@ -1412,6 +1413,7 @@ class ServoDriveController:
                     # print("msg.data:", msg.data)
                     if fault_code != 0:
                         rospy.logwarn(f"电机 {motor_id} 故障码: 0x{fault_code:04X} ({fault_code})")
+                        self.motor_driver = False   # 提示电机故障
                     else:
                         rospy.loginfo(f"电机 {motor_id} 无故障")
                         self.motor_driver = True
