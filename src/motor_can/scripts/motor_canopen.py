@@ -14,6 +14,7 @@ from std_srvs.srv import Trigger
 import threading
 import sys
 import select
+import traceback
 # import os
 
 rate = 68  # Hz   166.66>> 68.26
@@ -411,9 +412,12 @@ class ServoDriveController:
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
             self.state_pub.publish(json.dumps(state_msg))
-        except Exception:
+        except Exception as e:
             error_msg = {
-                "status": "ERROR" } # 或者自定义异常内容
+                "status": "ERROR",  # 或者自定义异常内容
+                "error_detail": str(e),
+                "traceback": traceback.format_exc(),
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}  # 2025-07-15 14:58:43
             self.state_pub.publish(json.dumps(error_msg))
 
     def status_callback(self, msg):
