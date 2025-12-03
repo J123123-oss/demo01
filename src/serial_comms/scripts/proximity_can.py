@@ -149,9 +149,9 @@ class DigitalInputReader:
 
     def poll_inputs(self, event):
         """Query and process digital inputs"""
-        if self.bus is None:
-            rospy.logerr("CAN bus not initialized!")
-            return
+        # if self.bus is None:
+        #     rospy.logerr("CAN bus not initialized!")
+        #     return
             
         try:
             query_frame = self._create_query_frame()
