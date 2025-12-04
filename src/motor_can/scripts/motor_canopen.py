@@ -210,17 +210,19 @@ class ServoDriveController:
         self.battery_temperatures = [] # 电池温度，共3个
         #继电器状态
         self.relay_status = None
+        self.relay_auto_off = None
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
+
         rospy.Subscriber('/robot_cmd', String, self.status_callback)
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
         rospy.Subscriber('/relay_status', Bool, self.relay_callback)
+        rospy.Subscriber('/relay_auto_off', Bool, self.relay_auto_off_callback)
+
 
         # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
-
-
 
 
     def set_state(self, new_state):
@@ -237,7 +239,7 @@ class ServoDriveController:
         #     self.need_speed_mode_init = True
         # 自动模式记录当前状态，UPSTOP与LOWSTOP待确认
         # if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
-        if self.auto_mode and new_state in ["FORWARD", "BACKWARD"]:
+        if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "UNLOADING"]:
             self.auto_step = new_state
             # print("auto_step:",self.auto_step)
         # 初始化为速度模式，添加恢复状态
@@ -255,16 +257,16 @@ class ServoDriveController:
             self.elevator_stage = 0
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(3.0), lambda event: self.publish_state())
             if self.fault_check_timer is not None:    
                 self.fault_check_timer.shutdown()
                 self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
-            threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
+            threading.Thread(target=self.delayed_publish_freq_switch,args=(3,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(3.0), lambda event: self.publish_state())
             if self.fault_check_timer is not None:    
                 self.fault_check_timer.shutdown()
                 self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
@@ -408,6 +410,7 @@ class ServoDriveController:
                 "complete_state":self.complete_state, # 任务完成状态
                 "auto_mode": self.auto_mode, # 自动模式开关,默认开
                 "relay_status": self.relay_status,
+                "relay_auto_off": self.relay_auto_off,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
@@ -475,6 +478,9 @@ class ServoDriveController:
     def relay_callback(self, msg):
         #继电器状态
         self.relay_status = msg.data
+    def relay_auto_off_callback(self, msg):
+        # 继电器超时关闭状态
+        self.relay_auto_off = msg.data
 
 
     def create_can_bus(self):
@@ -603,7 +609,9 @@ class ServoDriveController:
         if fault_code and fault_code != 0:
             rospy.logwarn(f"电机 {motor_id} 存在故障 (0x{fault_code:04X}), 尝试清除...")
             self.clear_fault(motor_id)
-            time.sleep(0.3)  # 等待故障清除
+            time.sleep(0.5)  # 等待故障清除
+            self.clear_fault(motor_id) # 二次清除
+
 
         rospy.loginfo(f"配置电机 {motor_id}: 速度={int(velocity/rate)}, 加速度={acceleration}, 减速度={deceleration}")
         self.start_motor(motor_id)
