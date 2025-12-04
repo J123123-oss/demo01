@@ -97,7 +97,7 @@ class ServoDriveController:
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -self.brush_speed      #1000 同向
+                "velocity_brush": self.brush_speed      #1000 同向
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
