@@ -34,12 +34,12 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 350
-        self.base_speed = 17000   #设置后退基础速度值  * 0.8 > * 1
+        self.motor_base = 700 #350
+        self.base_speed = 34000 # 17000   #设置后退基础速度值  * 0.8 > * 1
         self.brush_speed = 1600 * rate # 设置滚刷速度
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 25840  #(380*rate)  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 760*rate #25840  #(380*rate)  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -257,7 +257,7 @@ class ServoDriveController:
             self.elevator_stage = 0
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(3.0), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
             if self.fault_check_timer is not None:    
                 self.fault_check_timer.shutdown()
                 self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
@@ -266,7 +266,7 @@ class ServoDriveController:
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(3.0), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
             if self.fault_check_timer is not None:    
                 self.fault_check_timer.shutdown()
                 self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
