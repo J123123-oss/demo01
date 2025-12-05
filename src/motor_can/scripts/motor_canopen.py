@@ -36,9 +36,9 @@ class ServoDriveController:
         self.motor_driver =True # 电机驱动器状态MQTT
         self.motor_base = 700 #350
         self.base_speed = 34000 # 17000   #设置后退基础速度值  * 0.8 > * 1
-        self.brush_speed = 1600 * rate # 设置滚刷速度
+        self.brush_speed = rospy.get_param('~brush_speed', 1600 * rate) # 设置滚刷速度
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
-        self.brush_forward = False  # 默认反转 True=正转，False=反转
+        self.brush_forward = rospy.get_param('~brush_forward', False)# 默认反转 True=正转，False=反转
 
         self.speed_pluse_max = 760*rate #25840  #(380*rate)  #23800 #32467      #23800   # 17000
         # 计时阶段参数
@@ -98,7 +98,7 @@ class ServoDriveController:
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": lambda self: -self.brush_speed * (1 if self.brush_forward else -1)
+                "velocity_brush": lambda self: self.brush_speed * (1 if self.brush_forward else -1)
                 # "velocity_brush": -self.brush_speed *(1 if self.brush_forward else -1)  #静态值不可用  
                                     #1000 同向,brush_forward默认反转
             },
@@ -1745,7 +1745,9 @@ def main():
     try:
     # 每0.05秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.05), controller.execute_state)
+        controller.set_state("STOP")
         rospy.spin()
+
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")
     finally:

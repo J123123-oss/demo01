@@ -3,6 +3,8 @@
 <arg name="robot_ID" default="Erenhot_Baihuiyuan" />
 <!-- <arg name="robot_ID" default="GF-HZ-OPI3B" /> -->
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
+        <param name="~brush_speed" value="1600*68"/>
+        <param name="~brush_forward" value="False"/>
     </node>
     <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
         <param name="~broker" value="121.40.57.48"/>
