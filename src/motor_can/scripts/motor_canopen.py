@@ -98,7 +98,8 @@ class ServoDriveController:
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": -self.brush_speed *(1 if self.brush_forward else -1)    
+                "velocity_brush": lambda self: -self.brush_speed * (1 if self.brush_forward else -1)
+                # "velocity_brush": -self.brush_speed *(1 if self.brush_forward else -1)  #静态值不可用  
                                     #1000 同向,brush_forward默认反转
             },
             "LOADING": {
@@ -437,6 +438,14 @@ class ServoDriveController:
             elif command == "BRUSH_FORWARD":
                 self.brush_forward = not self.brush_forward
                 rospy.loginfo(f"滚刷顺转: {self.brush_forward}")
+                            # 关键添加：立即计算并下发新的滚刷速度
+                if self.current_status == "BACKWARD":
+                    # 计算最新滚刷速度
+                    new_brush_speed = -self.brush_speed * (1 if self.brush_forward else -1)
+                    # 直接下发给电机（ID=4）
+                    self.set_target_velocity(4, new_brush_speed)
+                    self.last_brush_speed = new_brush_speed  # 更新缓存的速度值
+                    rospy.loginfo(f"立即更新滚刷速度: {new_brush_speed/rate} RPM")
 
             elif command in self.status_list:
                 # print("cmd:", command)
@@ -449,6 +458,11 @@ class ServoDriveController:
             if msg.data == "BRUSH_FORWARD":
                 self.brush_forward = not self.brush_forward
                 rospy.loginfo(f"滚刷顺转: {self.brush_forward}")
+                if self.current_status == "BACKWARD":
+                    new_brush_speed = -self.brush_speed * (1 if self.brush_forward else -1)
+                    self.set_target_velocity(4, new_brush_speed)
+                    self.last_brush_speed = new_brush_speed
+                    rospy.loginfo(f"立即更新滚刷速度: {new_brush_speed/rate} RPM")
             self.set_state(msg.data)
             self.publish_state()
 
@@ -1057,9 +1071,14 @@ class ServoDriveController:
             correction = self.pid_correction(self.imu_yaw) * rate
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
             right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
             left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
+            # brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            if self.current_status == "BACKWARD":
+                # 执行 lambda 表达式获取实时值
+                brush_speed = self.status_config[self.current_status]["velocity_brush"](self)
+            else:
+                brush_speed = self.status_config[self.current_status]["velocity_brush"]
 
             # rospy.loginfo(f"IMU矫正: yaw={self.imu_yaw:.2f}, correction={correction:.2f}")
             if (self.last_left_speed != left_speed or
