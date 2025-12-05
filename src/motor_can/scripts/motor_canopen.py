@@ -38,6 +38,7 @@ class ServoDriveController:
         self.base_speed = 34000 # 17000   #设置后退基础速度值  * 0.8 > * 1
         self.brush_speed = 1600 * rate # 设置滚刷速度
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
+        self.brush_forward = False  # 默认反转 True=正转，False=反转
 
         self.speed_pluse_max = 760*rate #25840  #(380*rate)  #23800 #32467      #23800   # 17000
         # 计时阶段参数
@@ -97,7 +98,8 @@ class ServoDriveController:
             "BACKWARD": {  # 后退状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": self.brush_speed      #1000 同向
+                "velocity_brush": -self.brush_speed *(1 if self.brush_forward else -1)    
+                                    #1000 同向,brush_forward默认反转
             },
             "LOADING": {
                 # "velocity_up": self.motor_base *rate,
@@ -411,6 +413,7 @@ class ServoDriveController:
                 "auto_mode": self.auto_mode, # 自动模式开关,默认开
                 "relay_status": self.relay_status,
                 "relay_auto_off": self.relay_auto_off,
+                "brush_forward":  self.brush_forward ,# BACKWARD滚刷方向，False=反转（default） True=正转
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
@@ -431,6 +434,10 @@ class ServoDriveController:
             if command == "GET_STATUS":
                 self.publish_state()
                 # return
+            elif command == "BRUSH_FORWARD":
+                self.brush_forward = not self.brush_forward
+                rospy.loginfo(f"滚刷顺转: {self.brush_forward}")
+
             elif command in self.status_list:
                 # print("cmd:", command)
                 self.set_state(command)  
@@ -439,6 +446,9 @@ class ServoDriveController:
             
         except Exception as e:
             rospy.logwarn(f"消息解析失败，尝试按字符串处理: {msg.data}, 错误: {e}")
+            if msg.data == "BRUSH_FORWARD":
+                self.brush_forward = not self.brush_forward
+                rospy.loginfo(f"滚刷顺转: {self.brush_forward}")
             self.set_state(msg.data)
             self.publish_state()
 
@@ -1149,10 +1159,10 @@ class ServoDriveController:
                 # 使用更平滑的速度调整方式
                 if abs(self.imu_yaw) > 1:  # 如果角度偏差较大
                 # 根据偏差方向调整轮速
-                    right_speed = left_speed = int (-self.base_speed * 0.8 * self.flag)  # 基础后退速度+校正
+                    right_speed = left_speed = int (-self.base_speed * 0.6 * self.flag)  # 基础后退速度+校正
                 else:
                     # 角度接近时减速
-                    right_speed = left_speed = int(-self.base_speed * 0.6 * self.flag)
+                    right_speed = left_speed = int(-self.base_speed * 0.3 * self.flag)
                 right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 brush_speed = self.last_brush_speed
