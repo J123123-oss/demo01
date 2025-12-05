@@ -3,8 +3,13 @@
 <arg name="robot_ID" default="Erenhot_Baihuiyuan" />
 <!-- <arg name="robot_ID" default="GF-HZ-OPI3B" /> -->
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
-        <param name="~brush_speed" value="1600*68"/>
-        <param name="~brush_forward" value="False"/>
+        <!-- 1. 滚刷速度参数（私有参数，对应代码中的 ~brush_speed） -->
+        <!-- 1600*68=108800，可直接改 value 值 -->
+        <param name="~brush_speed" value="108800" type="int"/>
+
+        <!-- 2. 滚刷方向参数（私有参数，对应代码中的 ~brush_forward） -->
+        <!-- false=反转（默认），true=正转 -->
+        <param name="~brush_forward" value="false" type="bool"/>
     </node>
     <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
         <param name="~broker" value="121.40.57.48"/>

@@ -36,7 +36,7 @@ class ServoDriveController:
         self.motor_driver =True # 电机驱动器状态MQTT
         self.motor_base = 700 #350
         self.base_speed = 34000 # 17000   #设置后退基础速度值  * 0.8 > * 1
-        self.brush_speed = rospy.get_param('~brush_speed', 1600 * rate) # 设置滚刷速度
+        self.brush_speed = rospy.get_param('~brush_speed', 108800) # 设置滚刷速度,1600 * rate
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
         self.brush_forward = rospy.get_param('~brush_forward', False)# 默认反转 True=正转，False=反转
 
