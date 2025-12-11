@@ -1,0 +1,1134 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import time
+import rospy
+import json
+import yaml
+import threading
+import sys
+import select
+from std_msgs.msg import String, Int8, Float32, Bool
+from serial_comms.msg import Distances, Sensors, INSPVAE, BatteryStatus, Environment
+from std_srvs.srv import Trigger
+from pymodbus.client import ModbusSerialClient
+from pymodbus.payload import BinaryPayloadBuilder, BinaryPayloadDecoder
+from pymodbus.constants import Endian as ModbusEndian  
+
+# -------------------------- 驱动器核心配置 --------------------------
+BAUDRATE = 38400
+SERIAL_PORT = "/dev/ttyUSB0"  # 根据实际端口修改
+STOP_BITS = 1
+PARITY = "N"
+TIMEOUT = 3.0  # 通讯超时
+COMMAND_INTERVAL = 0.05  # 指令间隔50ms
+
+# 寄存器地址
+REG_CONTROL_MODE = 32768  # $8000：控制位+极对数
+REG_SPEED_SET = 32773     # $8005：速度设定（RPM）
+REG_FAULT_STATUS = 32795  # $801B：故障状态
+REG_ACTUAL_SPEED = 32792  # $8018：实际转速
+
+# 控制位定义
+CONTROL_EN = 0x01  # 使能
+CONTROL_FR = 0x02  # 正反转
+CONTROL_BK = 0x04  # 刹车
+CONTROL_NW = 0x08  # 通讯控制
+
+# 速比配置
+RATE = 24
+
+# 故障码映射
+FAULT_MAP = {
+    0x00: "无故障",
+    0x01: "堵转",
+    0x02: "过流",
+    0x08: "母线电压过低",
+    0x10: "母线电压过高",
+    0x20: "电流峰值报警",
+    0x80: "通讯中断报警",
+    0x88: "通讯中断报警（扩展码）"
+}
+
+class ServoDriveController:
+    def __init__(self):
+        # ROS初始化
+        rospy.init_node('motor_modbus_rtu_node', anonymous=True)
+        self.rate = rospy.Rate(20)
+
+        # 初始化RTU客户端为None，避免空值报错
+        self.rtu_client = None
+        self.motor_address_map = {1:1}
+        self.motor_pole_pairs = {1:5}
+
+        # 状态变量（保留原有）
+        self.last_left_speed = 0
+        self.last_right_speed = 0
+        self.last_brush_speed = 0
+        self.has_reverse_flag = False
+        self.has_reverse_counter = 0
+        self.reverse_start_time = None
+        self.main_board = True
+        self.imu_sensor = True
+        self.motor_driver = True
+        self.motor_base = 100
+        self.base_speed = 100
+        self.brush_base_speed = 80 * 20
+        self.flag = 0
+        self.speed_pluse_max = 120 * RATE
+        self.reversed_start_time = None
+        self.REVERSE_TIME_THRESHOLD = 3.0
+        self.unloading_timer = 2.0
+        self.unloading_start_time = None
+        self.start_time = 0
+        self.elevator_stage = 0
+        self.elevator_start_time = 0
+        self.LOW_BATTERY_THRESHOLD = 40
+        self.velocity_publish_count = 0
+        self.velocity_publish_interval = 2
+        self.last_velocity_up = 0
+        self.last_velocity_low = 0
+        self.last_velocity_brush = 0
+        self.heartbeat_running = False
+        self.heartbeat_thread = None
+        self.last_sensor_a = False
+        self.sensor_a_count = 0
+        self.last_sensor_time = 0
+
+        # 状态列表
+        self.status_list = [
+            "STOP", "FORWARD", "BACKWARD", "START", "LOADING", "UNLOADING",
+            "UPSTOP", "LOWSTOP", "PISTON_OUT", "PISTON_IN", "CHARGE_OUT",
+            "RETURN_DOCK", "PAUSE"
+        ]
+
+        # 状态速度配置
+        self.status_config = {
+            "START": {},
+            "STOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": 0},
+            "UNLOADING": {"velocity_up": -self.motor_base * RATE, "velocity_low": self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
+            "FORWARD": {"velocity_up": -self.motor_base * RATE, "velocity_low": self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
+            "BACKWARD": {"velocity_up": self.motor_base * RATE, "velocity_low": -self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
+            "LOADING": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
+            "PAUSE": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
+            "UPSTOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
+            "LOWSTOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
+            "REVERSE": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
+            "PISTON_OUT": {},
+            "PISTON_IN": {},
+            "CHARGE_OUT": {},
+            "RETURN_DOCK": {}
+        }
+
+        self.last_state = None
+        self.current_status = self.status_list[0]
+        self.current_velocity_up = 0
+        self.current_velocity_low = 0
+        self.current_velocity_brush = 0
+        self.counter_a = 0
+        self.counter_b = 0
+        self.counter_c = 0
+        self.counter_d = 0
+        self.threshold = 30
+        self.stop_flag = False
+        self.position_engaged = False
+        self.position_mode_configured = False
+        self.left_position = 0
+        self.right_position = 0
+        self.position_direction = 1
+        self.target_sent_flag = False
+        self.need_speed_mode_init = False
+        self.enable_drive_flag = False
+        self.stop_velocity = 0
+        self.imu_yaw = 0.0
+        self.initial_yaw = None
+        self.sensors_status = 0
+        self.complete_state = False
+        self.prev_motion_state = None
+        self.is_upstop = False
+        self.is_lowstop = False
+        self.auto_mode = True
+        self.auto_step = None
+        self.count = 1
+
+        # PID参数
+        self.pid_integral = 0.0
+        self.pid_last_error = 0.0
+        self.target_yaw = 0.0
+        self.pid_kp = 80
+        self.pid_ki = 0
+        self.pid_kd = 20
+        self.pid_correction_max = 80
+        self.progress = 0
+        self.battery_total_voltage = None
+        self.battery_current = None
+        self.battery_remaining = None
+        self.battery_temperatures = []
+        self.relay_status = None
+
+        # ROS发布订阅
+        self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
+        self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
+        rospy.Subscriber('/robot_cmd', String, self.status_callback)
+        rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
+        rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
+        rospy.Subscriber('/relay_status', Bool, self.relay_callback)
+        rospy.Subscriber("proximity_sensor_data", Sensors, self.proximity_callback)
+
+        # 环境数据
+        self.wind_speed = None
+        self.wind_direction = None
+        self.illuminance = None
+        self.rainfall = None
+
+        # 发布定时器
+        self.publish_timer = rospy.Timer(rospy.Duration(1.0), self.publish_state)
+
+        # 连接RTU客户端（增加超时保护）
+        self.connect_rtu_client_with_timeout()
+
+        # 启动IMU
+        # self.start_imu()
+
+    # -------------------------- 修复RTU连接问题 --------------------------
+    def connect_rtu_client_with_timeout(self):
+        """连接RTU客户端（增加超时保护，避免无限循环）"""
+        max_retry = 5  # 最大重试5次
+        retry_count = 0
+        
+        while not rospy.is_shutdown() and retry_count < max_retry:
+            try:
+                self.rtu_client = ModbusSerialClient(
+                    port=SERIAL_PORT,
+                    baudrate=BAUDRATE,
+                    stopbits=STOP_BITS,
+                    parity=PARITY,
+                    timeout=TIMEOUT
+                )
+                if self.rtu_client.connect():
+                    rospy.loginfo(f"✅ RTU客户端连接成功：{SERIAL_PORT}")
+                    return True
+                else:
+                    retry_count += 1
+                    rospy.logerr(f"❌ RTU客户端连接失败（重试{retry_count}/{max_retry}），3秒后重试...")
+                    time.sleep(3)
+            except Exception as e:
+                retry_count += 1
+                rospy.logerr(f"❌ RTU连接异常：{e}（重试{retry_count}/{max_retry}）")
+                time.sleep(3)
+        
+        rospy.logfatal(f"❌ RTU客户端连接失败，已重试{max_retry}次，请检查串口/接线！")
+        return False
+
+    def reconnect_rtu_client(self):
+        """重连RTU客户端（增加空值判断）"""
+        rospy.logwarn("🔄 尝试重连RTU客户端...")
+        # 空值判断：避免关闭None对象
+        if self.rtu_client is not None:
+            try:
+                self.rtu_client.close()
+            except:
+                pass
+        self.rtu_client = None
+        # 重新连接（单次尝试，避免无限循环）
+        try:
+            self.rtu_client = ModbusSerialClient(
+                port=SERIAL_PORT,
+                baudrate=BAUDRATE,
+                stopbits=STOP_BITS,
+                parity=PARITY,
+                timeout=TIMEOUT
+            )
+            if self.rtu_client.connect():
+                rospy.loginfo("✅ RTU客户端重连成功")
+                return True
+            else:
+                rospy.logerr("❌ RTU客户端重连失败")
+                return False
+        except Exception as e:
+            rospy.logerr(f"❌ RTU重连异常：{e}")
+            return False
+
+    # -------------------------- 修复RTU读写操作（增加空值判断）--------------------------
+    def rtu_write_register(self, motor_id, reg_addr, value):
+        """RTU写寄存器（增加空值判断）"""
+        # 先检查客户端是否有效
+        if self.rtu_client is None or not self.rtu_client.is_socket_open():
+            rospy.logerr("❌ RTU客户端未连接，无法写寄存器")
+            if not self.reconnect_rtu_client():
+                return False
+        
+        rtu_addr = self.motor_address_map.get(motor_id)
+        if rtu_addr is None: 
+            rospy.logerr(f"❌ 电机ID {motor_id} 无对应RTU站点")
+            return False
+        
+        try:
+            time.sleep(COMMAND_INTERVAL)
+            response = self.rtu_client.write_register(reg_addr, value, slave=rtu_addr)
+            if not response.isError():
+                rospy.logdebug(f"✅ 电机{motor_id}写寄存器0x{reg_addr:04X}成功：0x{value:04X}")
+                return True
+            rospy.logerr(f"❌ RTU写寄存器失败：电机{motor_id}，地址0x{reg_addr:04X}，错误{response}")
+            self.reconnect_rtu_client()
+            return False
+        except Exception as e:
+            rospy.logerr(f"❌ RTU写操作异常：{e}")
+            self.reconnect_rtu_client()
+            return False
+
+    def rtu_read_register(self, motor_id, reg_addr, count=1):
+        """RTU读寄存器（增加空值判断）"""
+        # 先检查客户端是否有效
+        if self.rtu_client is None or not self.rtu_client.is_socket_open():
+            rospy.logerr("❌ RTU客户端未连接，无法读寄存器")
+            if not self.reconnect_rtu_client():
+                return None
+        
+        rtu_addr = self.motor_address_map.get(motor_id)
+        if rtu_addr is None: 
+            rospy.logerr(f"❌ 电机ID {motor_id} 无对应RTU站点")
+            return None
+        
+        try:
+            time.sleep(COMMAND_INTERVAL)
+            response = self.rtu_client.read_holding_registers(reg_addr, count, slave=rtu_addr)
+            if not response.isError():
+                rospy.logdebug(f"✅ 电机{motor_id}读寄存器0x{reg_addr:04X}成功：{response.registers}")
+                return response.registers
+            rospy.logerr(f"❌ RTU读寄存器失败：电机{motor_id}，地址0x{reg_addr:04X}，错误{response}")
+            self.reconnect_rtu_client()
+            return None
+        except Exception as e:
+            rospy.logerr(f"❌ RTU读操作异常：{e}")
+            self.reconnect_rtu_client()
+            return None
+
+    # -------------------------- 电机控制方法（增加空值保护）--------------------------
+    def set_control_mode(self, motor_id, enable=True, direction=0, brake=False):
+        """设置控制模式（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法设置控制模式")
+            return False
+        
+        pole_pairs = self.motor_pole_pairs.get(motor_id, 5)
+        high_byte = CONTROL_NW | (CONTROL_EN if enable else 0) | (CONTROL_FR if direction else 0) | (CONTROL_BK if brake else 0)
+        low_byte = pole_pairs
+        control_value = (high_byte << 8) | low_byte
+        
+        success = self.rtu_write_register(motor_id, REG_CONTROL_MODE, control_value)
+        if success:
+            rospy.loginfo(f"✅ 电机{motor_id}控制模式设置成功：使能={enable}，方向={direction}，刹车={brake}")
+        return success
+
+    def set_target_velocity(self, motor_id, velocity):
+        """设置电机速度（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法设置速度")
+            return False
+        
+        velocity_abs = abs(velocity)
+        velocity_abs = max(min(velocity_abs, 65535), 0)
+        direction = 1 if velocity < 0 else 0
+        
+        success = self.rtu_write_register(motor_id, REG_SPEED_SET, velocity_abs)
+        if success:
+            self.set_control_mode(motor_id, enable=True, direction=direction)
+            rospy.logdebug(f"✅ 电机{motor_id}速度设置成功：{velocity} RPM")
+        return success
+
+    def get_actual_velocity(self, motor_id):
+        """读取实际转速（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法读取转速")
+            return 0
+        
+        registers = self.rtu_read_register(motor_id, REG_ACTUAL_SPEED, count=1)
+        if not registers or len(registers) != 1:
+            rospy.logwarn(f"⚠️ 读取电机{motor_id}转速失败")
+            return 0
+        
+        speed_code = registers[0]
+        pole_pairs = self.motor_pole_pairs.get(motor_id, 5)
+        actual_speed = (speed_code * 20) / pole_pairs
+        actual_speed = max(min(actual_speed, 65535), 0)
+        
+        return round(actual_speed, 2)
+
+    def read_fault_code(self, motor_id):
+        """读取故障码（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法读取故障码")
+            return None, "客户端未连接"
+        
+        registers = self.rtu_read_register(motor_id, REG_FAULT_STATUS, count=1)
+        if not registers:
+            rospy.logwarn(f"⚠️ 读取电机{motor_id}故障码失败")
+            return None, "读取失败"
+        
+        fault_16 = registers[0]
+        fault_code = (fault_16 >> 8) & 0xFF
+        fault_desc = FAULT_MAP.get(fault_code, f"未知故障（0x{fault_code:02X}）")
+        
+        if fault_code != 0x00:
+            rospy.logwarn(f"⚠️ 电机{motor_id}故障：{fault_desc}")
+            self.motor_driver = False
+        else:
+            self.motor_driver = True
+        
+        return fault_code, fault_desc
+
+    def clear_fault(self, motor_id):
+        """清除故障（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法清除故障")
+            return False
+        
+        rospy.loginfo(f"🔧 清除电机{motor_id}故障...")
+        self.set_control_mode(motor_id, enable=False, brake=True)
+        time.sleep(0.5)
+        success = self.set_control_mode(motor_id, enable=True, brake=False)
+        
+        if success:
+            rospy.loginfo(f"✅ 电机{motor_id}故障清除成功")
+            self.motor_driver = True
+        return success
+
+    def enable_drive(self, motor_id):
+        """使能电机"""
+        return self.set_control_mode(motor_id, enable=True, brake=False)
+
+    def disable_drive(self, motor_id):
+        """禁用电机（增加空值判断）"""
+        if self.rtu_client is None:
+            rospy.logerr(f"❌ RTU客户端未连接，无法禁用电机{motor_id}")
+            return False
+        return self.set_control_mode(motor_id, enable=False, brake=True)
+
+    def start_motor(self, motor_id):
+        """启动电机（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法启动电机")
+            return False
+        
+        if motor_id not in self.motor_address_map:
+            rospy.logerr(f"❌ 无效电机ID：{motor_id}")
+            return False
+        
+        fault_code, _ = self.read_fault_code(motor_id)
+        if fault_code and fault_code != 0x00:
+            self.clear_fault(motor_id)
+        
+        success = self.set_control_mode(motor_id, enable=True)
+        if success:
+            rospy.loginfo(f"✅ 电机{motor_id}初始化完成")
+        return success
+
+    # -------------------------- 修复键盘监听静态方法问题 --------------------------
+    def keyboard_listener(self):
+        """实例方法：键盘监听（替代静态方法）"""
+        rospy.loginfo("⌨️  按键控制：s=停止, f=前进, b=后退, a=启动, r=反转, l=加载, p=暂停, u=卸载, 1=上停, 2=下停")
+        while not rospy.is_shutdown():
+            if select.select([sys.stdin], [], [], 0.1)[0]:
+                key = sys.stdin.readline().strip()
+                if key:
+                    self.update_status_by_key(key)
+
+    def update_status_by_key(self, key):
+        """按键状态更新"""
+        key_mapping = {
+            's': "STOP", 'f': "FORWARD", 'b': "BACKWARD", 'a': "START",
+            'r': "REVERSE", 'l': "LOADING", 'p': "PAUSE", 'u': "UNLOADING",
+            '1': "UPSTOP", '2': "LOWSTOP"
+        }
+        if key in key_mapping:
+            if key != 'a':
+                self.auto_mode = False
+            else:
+                self.auto_mode = True
+            self.set_state(key_mapping[key])
+        else:
+            rospy.loginfo(f"⚠️  无效按键: {key}")
+
+    # -------------------------- 其他核心方法（保留并增加保护）--------------------------
+    def set_state(self, new_state):
+        if new_state not in self.status_config:
+            rospy.logwarn(f"⚠️ 尝试设置无效状态: {new_state}")
+            return False
+        if new_state == self.current_status and new_state not in ["PISTON_OUT", "PISTON_IN", "STOP"]:
+            return False
+        if self.current_status in ["FORWARD", "BACKWARD"] and (new_state == "CHARGE_OUT" or new_state == "RETURN_DOCK"):
+            return False
+
+        if self.auto_mode and new_state in ["FORWARD", "BACKWARD"]:
+            self.auto_step = new_state
+
+        if new_state in ["START", "CHARGE_OUT", "RETURN_DOCK"]:
+            self.complete_state = False
+            self.enable_drive_flag = True
+            self.progress = 0
+            self.motor_driver = True
+            self.imu_sensor = True
+            self.main_board = True
+
+        if new_state == "STOP":
+            self.elevator_stage = 0
+            self.publish_timer.shutdown()
+            self.publish_timer = rospy.Timer(rospy.Duration(1.0), self.publish_state)
+            self.stop_heartbeat()
+            threading.Thread(target=self.delayed_publish_freq_switch, args=(1,), daemon=True).start()
+        else:
+            self.publish_timer.shutdown()
+            self.publish_timer = rospy.Timer(rospy.Duration(1.0), self.publish_state)
+
+        if new_state in ["FORWARD", "BACKWARD"]:
+            if self.current_status != "REVERSE":
+                self.prev_motion_state = new_state
+
+        if new_state in ["REVERSE", "UPSTOP", "LOWSTOP"]:
+            if self.prev_motion_state is None:
+                self.prev_motion_state = self.last_state
+
+        elif new_state == "PISTON_IN":
+            self.initial_yaw = None
+            self.auto_step = None
+        elif new_state == "PISTON_OUT":
+            if self.count % 2:
+                self.auto_mode = False
+                rospy.loginfo("🔘 手动模式开")
+            else:
+                self.auto_mode = True
+                rospy.loginfo("🔘 自动模式开")
+            self.count += 1
+
+        self.current_status = new_state
+        self.last_state = self.current_status
+        rospy.loginfo(f"📌 状态已更新为: {self.current_status}")
+        return True
+
+    def lock_motor(self):
+        rospy.loginfo("🔒 电机向下转动，锁止")
+        self.motor_cmd_pub.publish(Int8(data=-1))
+        self.initial_yaw = None
+
+    def publish_state(self, event=None):
+        """发布状态（增加空值保护）"""
+        try:
+            self.velocity_publish_count += 1
+            if self.velocity_publish_count >= self.velocity_publish_interval and self.rtu_client is not None:
+                # self.last_velocity_up = self.get_actual_velocity(3)
+                self.last_velocity_low = self.get_actual_velocity(1)
+                # self.last_velocity_brush = self.get_actual_velocity(4)
+                self.velocity_publish_count = 0
+
+            # 构建状态消息
+            state_msg = {
+                "status": self.current_status,
+                "battery": self.battery_remaining,
+                "battery_temperatures": self.battery_temperatures,
+                "battery_total_voltage": self.battery_total_voltage,
+                "battery_current": self.battery_current,
+                "progress": self.progress,
+                "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
+                # "velocity_up": round(self.last_velocity_up * 20 / 24, 2),
+                "velocity_low": round(self.last_velocity_low * 20 / 24, 2),
+                # "velocity_brush": round(self.last_velocity_brush * 20 / 24, 2),
+                "sensors_status": self.sensors_status,
+                "device_status": {
+                    "main_board": self.main_board,
+                    "imu_sensor": self.imu_sensor,
+                    "motor_driver": self.motor_driver,
+                    "comm_module": self.rtu_client.is_socket_open() if self.rtu_client is not None else False
+                },
+                "complete_state": self.complete_state,
+                "auto_mode": self.auto_mode,
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+            }
+            self.state_pub.publish(json.dumps(state_msg, ensure_ascii=False))
+        except Exception as e:
+            rospy.logerr(f"❌ 发布状态异常: {e}")
+            error_msg = {"status": "ERROR", "error": str(e)}
+            self.state_pub.publish(json.dumps(error_msg))
+
+    def status_callback(self, msg):
+        """指令回调"""
+        try:
+            cmd_obj = json.loads(msg.data)
+            command = cmd_obj.get("command", None)
+            if command == "GET_STATUS":
+                self.publish_state()
+            elif command in self.status_list:
+                self.set_state(command)
+            else:
+                rospy.logwarn(f"⚠️ 未找到command字段: {msg.data}")
+        except Exception as e:
+            rospy.logwarn(f"⚠️ 消息解析失败: {msg.data}, 错误: {e}")
+            self.set_state(msg.data)
+            self.publish_state()
+
+    def imu_callback(self, msg):
+        """IMU回调"""
+        try:
+            self.imu_yaw = msg.yaw if hasattr(msg, "yaw") else 0.0
+            if self.initial_yaw is None:
+                self.initial_yaw = self.imu_yaw
+                rospy.loginfo(f"🧭 Initial IMU yaw: {self.initial_yaw}°")
+
+            if self.initial_yaw is not None:
+                relative_yaw = self.imu_yaw - self.initial_yaw
+                if relative_yaw > 180:
+                    relative_yaw -= 360
+                elif relative_yaw < -180:
+                    relative_yaw += 360
+                self.imu_yaw = relative_yaw
+        except Exception as e:
+            rospy.logerr(f"❌ 解析IMU数据失败: {e}")
+
+    def battery_status_callback(self, msg):
+        """电池回调"""
+        self.battery_remaining = msg.batttery_remaining
+        self.battery_total_voltage = round(msg.total_voltage, 2)
+        self.battery_current = round(msg.current, 2)
+        self.battery_temperatures = [round(t, 1) for t in msg.temperatures] if hasattr(msg, "temperatures") else []
+
+    def relay_callback(self, msg):
+        """继电器回调"""
+        self.relay_status = msg.data
+
+    def delayed_publish_freq_switch(self, delay_sec=3):
+        """延迟切换发布频率"""
+        time.sleep(delay_sec)
+        if self.current_status == "STOP" and not rospy.is_shutdown():
+            self.publish_timer.shutdown()
+            self.publish_timer = rospy.Timer(rospy.Duration(1800), self.publish_state)
+
+    def proximity_callback(self, msg):
+        """接近开关回调"""
+        if msg.sensor_a:
+            self.sensors_status |= 0x01
+        else:
+            self.sensors_status &= ~0x01
+        if msg.sensor_b:
+            self.sensors_status |= 0x02
+        else:
+            self.sensors_status &= ~0x02
+        if msg.sensor_c:
+            self.sensors_status |= 0x04
+        else:
+            self.sensors_status &= ~0x04
+        if msg.sensor_d:
+            self.sensors_status |= 0x08
+        else:
+            self.sensors_status &= ~0x08
+
+        current_time = time.time()
+        if self.last_sensor_a == False and msg.sensor_a == True:
+            if (current_time - self.last_sensor_time) > 5.0:
+                self.sensor_a_count += 1
+                rospy.loginfo(f"🔍 传感器A触发次数: {self.sensor_a_count}")
+                self.last_sensor_time = current_time
+
+        # 自动模式逻辑
+        if self.auto_mode and self.current_status == "RETURN_DOCK":
+            if self.elevator_stage == 2:
+                self.set_state("FORWARD")
+
+        if self.auto_mode and self.current_status == "CHARGE_OUT":
+            if self.elevator_stage == 2:
+                if (msg.sensor_a or msg.sensor_c):
+                    if self.current_status != "UNLOADING":
+                        self.set_state("UNLOADING")
+                        self.progress = 10
+                        self.unloading_start_time = time.time()
+                if self.current_status == "UNLOADING" and self.unloading_start_time:
+                    if (current_time - self.unloading_start_time) >= self.unloading_timer:
+                        self.progress = 0
+                        self.unloading_start_time = None
+
+        if self.auto_mode and self.current_status == "START":
+            if self.elevator_stage == 2:
+                if (msg.sensor_a or msg.sensor_c):
+                    if self.current_status != "UNLOADING":
+                        self.set_state("UNLOADING")
+                        self.progress = 10
+                        self.unloading_start_time = time.time()
+                elif (not msg.sensor_a and not msg.sensor_c):
+                    self.set_state("BACKWARD")
+                    self.progress = 20
+                if self.current_status == "UNLOADING" and self.unloading_start_time:
+                    if (current_time - self.unloading_start_time) >= self.unloading_timer:
+                        self.set_state("BACKWARD")
+                        self.progress = 20
+                        self.unloading_start_time = None
+
+        # 边界触发逻辑
+        if self.current_status == "REVERSE":
+            if msg.sensor_a and msg.sensor_c:
+                rospy.logwarn("🚨 左侧边界全触发，停止")
+                self.set_state("STOP")
+            elif msg.sensor_b and msg.sensor_d:
+                rospy.logwarn("🚨 右侧边界全触发，停止")
+                self.set_state("STOP")
+            elif msg.sensor_a or msg.sensor_b:
+                rospy.logwarn("⚠️  下侧边界触发，上停")
+                self.set_state("LOWSTOP")
+            elif msg.sensor_c or msg.sensor_d:
+                rospy.logwarn("⚠️  上侧边界触发，下停")
+                self.set_state("UPSTOP")
+
+        # 前进/后退逻辑
+        if self.auto_mode:
+            if self.current_status == "FORWARD":
+                if msg.sensor_a and msg.sensor_c:
+                    threading.Timer(0.1, self.lock_motor).start()
+                    self.set_state("PAUSE")
+                    self.complete_state = True
+                    self.progress = 100
+                    self.auto_step = None
+                    self.elevator_stage = 0
+                    rospy.loginfo("✅ 进仓完成")
+                    time.sleep(3)
+                    self.set_state("BACKWARD")
+                    self.progress = 10
+                elif (msg.sensor_a and not msg.sensor_c):
+                    self.set_state("LOWSTOP")
+                elif (msg.sensor_c and not msg.sensor_a):
+                    self.set_state("UPSTOP")
+            if self.current_status == "BACKWARD":
+                if (msg.sensor_b and msg.sensor_d):
+                    self.initial_yaw = None
+                    rospy.loginfo("🧭 重置偏航角")
+                    self.set_state("LOADING")
+                    time.sleep(3)
+                    self.set_state("FORWARD")
+                    self.progress = 60
+                elif (msg.sensor_b and not msg.sensor_d):
+                    self.set_state("LOWSTOP")
+                elif (msg.sensor_d and not msg.sensor_b):
+                    self.set_state("UPSTOP")
+        else:
+            if self.current_status == "FORWARD":
+                if msg.sensor_a and msg.sensor_c:
+                    threading.Timer(0.1, self.lock_motor).start()
+                    self.set_state("PAUSE")
+                    time.sleep(1)
+                    self.complete_state = True
+                    self.progress = 100
+                    self.auto_step = None
+                    self.elevator_stage = 0
+                    time.sleep(3)
+                    self.set_state("BACKWARD")
+                    self.progress = 10
+                elif (msg.sensor_a and not msg.sensor_c):
+                    self.set_state("LOWSTOP")
+                elif (msg.sensor_c and not msg.sensor_a):
+                    self.set_state("UPSTOP")
+            elif self.current_status == "BACKWARD":
+                if msg.sensor_b and msg.sensor_d:
+                    self.set_state("LOADING")
+                    time.sleep(1)
+                    self.complete_state = True
+                    self.progress = 100
+                    self.auto_step = None
+                    self.elevator_stage = 0
+                elif (msg.sensor_b and not msg.sensor_d):
+                    self.set_state("LOWSTOP")
+                elif (msg.sensor_d and not msg.sensor_b):
+                    self.set_state("UPSTOP")
+
+        # UPSTOP/LOWSTOP逻辑
+        if self.current_status == "LOWSTOP":
+            if msg.sensor_c:
+                threading.Timer(0.1, self.lock_motor).start()
+                self.set_state("PAUSE")
+                self.complete_state = True
+                self.initial_yaw = None
+                self.progress = 100
+                self.auto_step = None
+                self.is_lowstop = False
+                self.elevator_stage = 0
+                rospy.loginfo("✅ 进仓完成")
+                time.sleep(3)
+                self.set_state("BACKWARD")
+                self.progress = 10
+            if msg.sensor_d:
+                self.initial_yaw = None
+                self.set_state("LOADING")
+                time.sleep(3)
+                self.set_state("FORWARD")
+                self.progress = 60
+
+        if self.current_status == "UPSTOP":
+            if msg.sensor_a:
+                threading.Timer(0.1, self.lock_motor).start()
+                self.set_state("PAUSE")
+                self.complete_state = True
+                self.initial_yaw = None
+                self.progress = 100
+                self.auto_step = None
+                self.is_upstop = False
+                self.elevator_stage = 0
+                rospy.loginfo("✅ 进仓完成")
+                time.sleep(3)
+                self.set_state("BACKWARD")
+                self.progress = 10
+            if msg.sensor_b:
+                self.initial_yaw = None
+                self.set_state("LOADING")
+                time.sleep(3)
+                self.set_state("FORWARD")
+                self.progress = 60
+
+        self.last_sensor_a = msg.sensor_a
+
+    def pid_correction(self, current_yaw):
+        """PID矫正"""
+        error = self.target_yaw - current_yaw
+        if abs(error) < 0.05:
+            return 0
+        if abs(error) > 0.3:
+            self.pid_integral = 0
+        self.pid_integral += error
+        derivative = error - self.pid_last_error
+        integral_max = 30
+        self.pid_integral = max(min(self.pid_integral, integral_max), -integral_max)
+        correction = (self.pid_kp * error + self.pid_ki * self.pid_integral + self.pid_kd * derivative)
+        self.pid_last_error = error
+        return -max(min(-correction, self.pid_correction_max), -self.pid_correction_max)
+
+    def execute_state(self):
+        """状态执行"""
+        # 客户端未连接时不执行电机控制
+        if self.rtu_client is None:
+            rospy.logwarn("⚠️ RTU客户端未连接，跳过电机控制")
+            return
+
+        # START状态
+        if self.enable_drive_flag and (self.current_status == "START" or self.current_status == "CHARGE_OUT" or self.current_status == "RETURN_DOCK"):
+            if self.battery_remaining is not None and self.battery_remaining < self.LOW_BATTERY_THRESHOLD:
+                rospy.logerr("🔋 电量过低，停止启动")
+                self.enable_drive_flag = False
+                self.main_board = False
+                self.set_state("STOP")
+                return
+            if self.elevator_stage == 0:
+                rospy.loginfo("🔼 电缸抬起...")
+                self.motor_cmd_pub.publish(Int8(data=1))
+                self.elevator_start_time = rospy.get_time()
+                self.elevator_stage = 1
+            elif self.elevator_stage == 1:
+                elapsed = rospy.get_time() - self.elevator_start_time
+                if elapsed >= 0.1:
+                    rospy.loginfo("⚙️  配置电机...")
+                    config = self.load_config()
+                    for motor in config.get("motors", []):
+                        motor_id = motor.get("id")
+                        velocity = motor.get("velocity")
+                        if None in (motor_id, velocity):
+                            rospy.logwarn(f"⚠️  跳过无效配置: {motor}")
+                            continue
+                        try:
+                            self.configure_motor(motor_id=motor_id, velocity=int(velocity * RATE))
+                        except Exception as e:
+                            rospy.logerr(f"❌ 配置电机 {motor_id} 出错: {e}")
+                    rospy.loginfo("✅ 电机配置完成")
+                    self.enable_drive_flag = False
+                    self.elevator_stage = 2
+                    self.start_time = rospy.get_time()
+                    if self.auto_mode and self.auto_step and self.current_status == "START":
+                        self.set_state(self.auto_step)
+
+        # FORWARD/BACKWARD
+        if self.current_status in ["FORWARD", "BACKWARD"]:
+            correction = self.pid_correction(self.imu_yaw)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
+            right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
+            left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
+
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, right_speed)
+                # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+
+            # 角度偏差检测
+            angle_condition_met = (-5 < self.imu_yaw < -2.5 or 2.5 < self.imu_yaw < 5)
+            if angle_condition_met:
+                if self.reversed_start_time is None:
+                    self.reversed_start_time = rospy.get_time()
+                    rospy.logwarn(f"⚠️  角度偏差: {self.imu_yaw:.2f}°")
+                elapsed = rospy.get_time() - self.reversed_start_time
+                if elapsed >= self.REVERSE_TIME_THRESHOLD:
+                    rospy.logwarn(f"⚠️  进入反转矫正")
+                    self.set_state("REVERSE")
+                    self.reversed_start_time = None
+            else:
+                self.reversed_start_time = None
+
+        # REVERSE
+        elif self.current_status == "REVERSE":
+            self.reversed_start_time = None
+            if not self.has_reverse_flag:
+                self.has_reverse_counter += 1
+                if self.has_reverse_counter > 10:
+                    rospy.logwarn("⚠️  连续反转10次，停止")
+                    self.has_reverse_counter = 0
+                    self.set_state("STOP")
+                    self.motor_driver = False
+                    self.imu_sensor = False
+                    return
+                right_speed = -int(self.last_right_speed)
+                left_speed = -int(self.last_left_speed)
+                brush_speed = self.last_brush_speed
+                right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
+                left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
+                if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                    # self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(1, right_speed)
+                    # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+                self.has_reverse_flag = True
+                self.reverse_start_time = time.time()
+                time.sleep(2.0)
+            else:
+                self.flag = -1 if self.imu_yaw >= 0 else 1
+                if abs(self.imu_yaw) > 1:
+                    right_speed = left_speed = int(-self.base_speed * RATE * 0.8 * self.flag)
+                else:
+                    right_speed = left_speed = int(-self.base_speed * RATE * 0.6 * self.flag)
+                right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
+                left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
+                brush_speed = self.last_brush_speed
+                if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                    # self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(1, right_speed)
+                    # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+                if abs(self.imu_yaw) < 0.2:
+                    if self.prev_motion_state:
+                        self.set_state(self.prev_motion_state)
+                    self.is_upstop = False
+                    self.is_lowstop = False
+                    self.has_reverse_flag = False
+
+        # UPSTOP/LOWSTOP
+        elif self.current_status == "UPSTOP":
+            left_speed = 0
+            right_speed = self.last_right_speed
+            brush_speed = -self.brush_base_speed
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, right_speed)
+                # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+        elif self.current_status == "LOWSTOP":
+            left_speed = self.last_left_speed
+            right_speed = 0
+            brush_speed = -self.brush_base_speed
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, right_speed)
+                # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+
+        # STOP
+        elif self.current_status == "STOP" or not -5 < self.imu_yaw < 5:
+            if (self.last_left_speed != 0 or self.last_right_speed != 0 or self.last_brush_speed != 0):
+                self.has_reverse_counter = 0
+                for motor_id in self.motor_address_map.keys():
+                    self.disable_drive(motor_id)
+                self.last_left_speed = 0
+                self.last_right_speed = 0
+                self.last_brush_speed = 0
+                self.need_speed_mode_init = True
+
+        # UNLOADING
+        elif self.current_status == "UNLOADING":
+            correction = self.pid_correction(self.imu_yaw)
+            left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
+            right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
+            brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, right_speed)
+                # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+
+        # LOADING/PAUSE
+        elif self.current_status in ["LOADING", "PAUSE"]:
+            left_speed = int(self.status_config[self.current_status]["velocity_up"])
+            right_speed = int(self.status_config[self.current_status]["velocity_low"])
+            brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(1, right_speed)
+                # self.set_target_velocity(4, brush_speed)
+                self.last_left_speed = left_speed
+                self.last_right_speed = right_speed
+                self.last_brush_speed = brush_speed
+
+    def configure_motor(self, motor_id, velocity):
+        """配置电机"""
+        fault_code, _ = self.read_fault_code(motor_id)
+        if fault_code and fault_code != 0x00:
+            self.clear_fault(motor_id)
+            time.sleep(0.3)
+        
+        rospy.loginfo(f"⚙️  配置电机 {motor_id}: {int(velocity/RATE)} RPM")
+        self.start_motor(motor_id)
+        self.set_target_velocity(motor_id, velocity)
+        self.enable_drive(motor_id)
+        self.start_heartbeat(motor_id)
+
+    def start_heartbeat(self, motor_id):
+        """启动心跳"""
+        self.heartbeat_running = True
+        self.heartbeat_thread = threading.Thread(
+            target=self._cycle_heartbeat,
+            args=(motor_id,),
+            daemon=True
+        )
+        self.heartbeat_thread.start()
+        rospy.loginfo(f"❤️ 心跳启动：电机{motor_id}")
+
+    def _cycle_heartbeat(self, motor_id, interval=1.5):
+        """心跳循环"""
+        while self.heartbeat_running and not rospy.is_shutdown():
+            if self.rtu_client is None:
+                time.sleep(interval)
+                continue
+            speed = self.get_actual_velocity(motor_id)
+            if speed is None:
+                rospy.logwarn(f"❤️ 电机 {motor_id} 通讯异常")
+                self.motor_driver = False
+                self.reconnect_rtu_client()
+            else:
+                self.motor_driver = True
+            time.sleep(interval)
+
+    def stop_heartbeat(self):
+        """停止心跳"""
+        self.heartbeat_running = False
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=2)
+        rospy.loginfo("❤️ 心跳停止")
+
+    def load_config(self, config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+        """加载配置"""
+        try:
+            with open(config_file, 'r') as file:
+                config = yaml.safe_load(file)
+                return config
+        except FileNotFoundError:
+            rospy.logerr(f"❌ 配置文件未找到: {config_file}")
+            return {}
+        except Exception as e:
+            rospy.logerr(f"❌ 加载配置出错: {e}")
+            return {}
+
+    def start_imu(self):
+        """启动IMU"""
+        while not rospy.is_shutdown():
+            try:
+                rospy.wait_for_service('/imu_parser_node/start_imu', timeout=5)
+                start_srv = rospy.ServiceProxy('/imu_parser_node/start_imu', Trigger)
+                resp = start_srv()
+                rospy.loginfo(f"🧭 IMU启动成功: {resp.message}")
+                break
+            except Exception as e:
+                rospy.loginfo(f"🧭 等待IMU服务: {e}")
+                time.sleep(1)
+
+    def stop_imu(self):
+        """停止IMU"""
+        try:
+            rospy.wait_for_service('/imu_parser_node/stop_imu')
+            stop_srv = rospy.ServiceProxy('/imu_parser_node/stop_imu', Trigger)
+            resp = stop_srv()
+            rospy.loginfo(f"🧭 IMU停止成功: {resp.message}")
+        except Exception as e:
+            rospy.loginfo(f"🧭 停止IMU失败: {e}")
+
+    def shutdown(self):
+        """安全关闭（增加空值判断）"""
+        rospy.loginfo("🔌 关闭控制器...")
+        # 停止心跳
+        self.stop_heartbeat()
+        # 禁用电机（增加空值判断）
+        if self.rtu_client is not None:
+            for motor_id in self.motor_address_map.keys():
+                try:
+                    self.disable_drive(motor_id)
+                except:
+                    pass
+            # 关闭客户端
+            try:
+                self.rtu_client.close()
+            except:
+                pass
+        # 停止IMU
+        # self.stop_imu()
+        # 停止定时器
+        if hasattr(self, 'publish_timer'):
+            self.publish_timer.shutdown()
+        rospy.loginfo("✅ 控制器已关闭")
+
+def main():
+    controller = None
+    try:
+        controller = ServoDriveController()
+        # 加载配置
+        config = controller.load_config()
+        if not config or "motors" not in config:
+            rospy.logerr("❌ 无有效电机配置")
+        else:
+            rospy.loginfo("⚙️  初始化电机...")
+            for motor in config["motors"]:
+                motor_id = motor.get("id")
+                velocity = motor.get("velocity")
+                if None in (motor_id, velocity):
+                    rospy.logwarn(f"⚠️  跳过无效配置: {motor}")
+                    continue
+                try:
+                    controller.configure_motor(motor_id=motor_id, velocity=int(velocity * RATE))
+                    controller.current_status = controller.status_list[0]
+                except Exception as e:
+                    rospy.logerr(f"❌ 配置电机 {motor_id} 出错: {e}")
+        
+        # 启动键盘监听（实例方法）
+        if controller is not None:
+            t = threading.Thread(target=controller.keyboard_listener, daemon=True)
+            t.start()
+        
+        # 主循环
+        # controller.set_state("STOP")
+        while not rospy.is_shutdown():
+            controller.execute_state()
+            controller.rate.sleep()
+            
+    except KeyboardInterrupt:
+        rospy.loginfo("🛑 用户终止程序")
+    except Exception as e:
+        rospy.logfatal(f"💥 节点启动失败: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # 确保资源释放
+        if controller is not None:
+            controller.shutdown()
+
+if __name__ == "__main__":
+    main()

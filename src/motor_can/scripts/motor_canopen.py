@@ -14,6 +14,8 @@ from std_srvs.srv import Trigger
 import threading
 import sys
 import select
+# import wiringpi
+# from wiringpi import GPIO
 # import os
 
 rate = 24  # rpm*24速比
@@ -21,6 +23,17 @@ rate = 24  # rpm*24速比
 class ServoDriveController:
     # def __init__(self, channel='vcan0', interface='socketcan'):
     def __init__(self, channel='can0', interface='socketcan'):
+        # try:
+        #     wiringpi.wiringPiSetupGPIO()
+        #     wiringpi.pinMode(2, GPIO.OUTPUT)
+        #     wiringpi.pinMode(3, GPIO.OUTPUT) 
+        #     wiringpi.digitalWrite(2, GPIO.HIGH)  
+        #     wiringpi.digitalWrite(3, GPIO.HIGH)
+        #     self.gpio_initialized = True
+        # except Exception as e:
+        #     rospy.logerr("Failed to initialize GPIO: %s. Running without GPIO support.", str(e))
+        #     self.gpio_initialized = False
+
         self.channel = channel
         self.interface = interface
         self.bus = self.create_can_bus()
@@ -33,12 +46,12 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 30   #下发电机理想转速rpm
-        self.base_speed = 30   #设置后退基础速度值  * 0.8 > * 1
-        self.brush_base_speed = 150 * 20 # 未加减速器的rpm
+        self.motor_base = 20   #下发电机理想转速rpm
+        self.base_speed = 20   #设置后退基础速度值  * 0.8 > * 1
+        self.brush_base_speed = 80 * 20 # 未加减速器的rpm
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 60*rate  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 40*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -98,10 +111,15 @@ class ServoDriveController:
                 "velocity_low": 0,
                 "velocity_brush": 0
             },
+            "UNLOADING":{
+                "velocity_up": -self.motor_base * rate,
+                "velocity_low": self.motor_base * rate,
+                "velocity_brush": -self.brush_base_speed
+            },
             "FORWARD": {  # 前进状态
                 "velocity_up": -self.motor_base * rate,
                 "velocity_low": self.motor_base * rate,
-                "velocity_brush": self.brush_base_speed      #-1000 同向
+                "velocity_brush": -self.brush_base_speed      #-1000 同向
             },
             "BACKWARD": {  # 后退状态
                 "velocity_up": self.motor_base * rate,
@@ -115,7 +133,7 @@ class ServoDriveController:
                 # 测试滚刷
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": self.brush_base_speed   #-1000 同向
+                "velocity_brush": -self.brush_base_speed   #-1000 同向
             },
             "PAUSE": {
                 #循环测试需要对向加入等待
@@ -123,25 +141,21 @@ class ServoDriveController:
                 "velocity_low": 0,
                 "velocity_brush": -self.brush_base_speed   #1000 同向
             },
-            "UNLOADING":{
-                "velocity_up": 0,
-                "velocity_low": 0,
-                "velocity_brush": self.brush_base_speed
-            },
             "UPSTOP":{
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 0
+                "velocity_brush": -self.brush_base_speed
             },
+
             "LOWSTOP":{
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 0
+                "velocity_brush": -self.brush_base_speed
             },
             "REVERSE": {  # 后退矫正状态
                 "velocity_up": 0,
                 "velocity_low": 0,
-                "velocity_brush": 0
+                "velocity_brush": -self.brush_base_speed
             },
             "PISTON_OUT":{
                 #目前用与自动模式与手动模式的切换
@@ -154,8 +168,11 @@ class ServoDriveController:
                 #出仓充电
             },
             "RETURN_DOCK":{
-                #回仓取消充电
             }
+        }
+
+                #回仓取消充电
+            # }
             # "FORWARD": {  # 测试电机功耗前进状态
             #     #下发100到电机减速20：1，实际为5RPM ，发self.motor_base最终12.5RPM，速度0.078m/s
             #     "velocity_up": 637 * rate,   #实际速度0.2m/s
@@ -167,7 +184,7 @@ class ServoDriveController:
             #     "velocity_low": 637 * rate,
             #     "velocity_brush": 1500 * rate   #滚刷速比8
             # }
-        }
+        # }
         self.last_state = None  # 记录上一次的状态
         self.current_status = self.status_list[0]  # 当前默认停止状态
         self.current_velocity_up = 0   # ID = 3
@@ -734,12 +751,18 @@ class ServoDriveController:
             self.sensors_status |= 0x08
         else:
             self.sensors_status &= ~0x08
-        # 记录触发sensor_a的次数
+
+        current_time = time.time()  # 获取当前时间戳
+        # 条件1：传感器A从False变为True（上升沿触发）
+        # 条件2：距离上次有效触发超过5秒
         if self.last_sensor_a == False and msg.sensor_a == True:
-            # 5秒内只记录一次
-            if(time.time() - self.last_sensor_time > 5):
+            if (current_time - self.last_sensor_time) > 5.0:
                 self.sensor_a_count += 1
-                rospy.loginfo("触发次数: %d", self.sensor_a_count)
+                rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
+                self.last_sensor_time = current_time  # 触发成功后更新时间戳（核心修复）
+            else:
+                rospy.loginfo(f"传感器A触发但未计数（间隔不足5秒，剩余: {5.0 - (current_time - self.last_sensor_time):.1f}秒）")
+    
         
         if self.auto_mode and self.current_status == "RETURN_DOCK": 
             #回仓
@@ -765,7 +788,7 @@ class ServoDriveController:
                         # rospy.loginfo(f"已等待: {elapsed:.2f}秒, 目标: {self.unloading_timer}秒")
                         
                         if elapsed >= self.unloading_timer and self.current_status == "UNLOADING":
-                            self.set_state("STOP")
+                            # self.set_state("STOP")
                             self.progress = 0
                             self.unloading_start_time = None  # 重置
                             #停止IMU
@@ -963,7 +986,6 @@ class ServoDriveController:
                 self.progress = 60
         #记录触发次数
         self.last_sensor_a = msg.sensor_a
-        self.last_sensor_time = time.time()
         
 
         # if self.current_status == self.status_list[4]:  # LOADING 未使用
@@ -1107,10 +1129,17 @@ class ServoDriveController:
 
         # 2. FORWARD/BACKWARD状态：IMU矫正
         if self.current_status in ["FORWARD", "BACKWARD"]:
+            # if self.gpio_initialized:
+            #     if current_status == "FORWARD":
+            #         wiringpi.digitalWrite(2, GPIO.LOW)  
+            #         wiringpi.digitalWrite(3, GPIO.HIGH) 
+            #     else:
+            #         wiringpi.digitalWrite(2, GPIO.HIGH)  
+            #         wiringpi.digitalWrite(3, GPIO.LOW)
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
             right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
             left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
 
@@ -1260,7 +1289,7 @@ class ServoDriveController:
             left_speed = 0 # 上电机停
             # right_speed = int(-self.speed_pluse_max * 1)  # 下轮保持切换前速度
             right_speed = self.last_right_speed  # 下轮保持切换前速度
-            brush_speed = self.last_brush_speed
+            brush_speed = -self.brush_base_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -1278,7 +1307,7 @@ class ServoDriveController:
             # left_speed = int(self.speed_pluse_max * 1) # 上电机保持切换前速度 
             left_speed =  self.last_left_speed  # 上电机保持切换前速度 
             right_speed = 0 # 下电机停
-            brush_speed = self.last_brush_speed
+            brush_speed = -self.brush_base_speed
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -1328,7 +1357,7 @@ class ServoDriveController:
             correction = self.pid_correction(self.imu_yaw)
             left_speed = int(self.status_config[self.current_status]["velocity_up"] + correction)
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -1345,7 +1374,7 @@ class ServoDriveController:
         elif self.current_status in ["LOADING", "PAUSE"]:
             left_speed = int(self.status_config[self.current_status]["velocity_up"])
             right_speed = int(self.status_config[self.current_status]["velocity_low"])
-            brush_speed = self.status_config[self.current_status]["velocity_brush"]
+            brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
             if (self.last_left_speed != left_speed or
                 self.last_right_speed != right_speed or
                 self.last_brush_speed != brush_speed):
@@ -1630,6 +1659,7 @@ def main():
     try:
     # 每0.05秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.05), controller.execute_state)
+        controller.set_state("STOP")
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")

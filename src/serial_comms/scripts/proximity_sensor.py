@@ -70,10 +70,10 @@ class ModbusRTUSwitchReader:
         
         # 解析4路开关状态（按位从低到高对应sensor_a到sensor_d）
         return {
-            'sensor_a': bool(status_value & 0b000000001), # 检测第0.0位
-            'sensor_b': bool(status_value & 0b100000000), # 检测第0.8位
-            'sensor_c': bool(status_value & 0b000000100), # 检测第0.2位
-            'sensor_d': bool(status_value & 0b000010000)  # 检测第0.4位
+            'sensor_a': bool(status_value & 0b000000001), # 检测第1位
+            'sensor_b': bool(status_value & 0b100000000), # 检测第7位
+            'sensor_c': bool(status_value & 0b000000100), # 检测第3位
+            'sensor_d': bool(status_value & 0b000010000)  # 检测第5位
         }
     def timer_callback(self, event):
         try:
