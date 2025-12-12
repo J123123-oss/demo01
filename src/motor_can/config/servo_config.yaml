@@ -6,12 +6,12 @@ motors:
     # acceleration: 100 # 加速度 (1000 转/毫秒)范围10~1000
     # deceleration: 500 # 减速度(1000 转/毫秒)
 
-  # - id: 3      # 远离工控机电机ID
-    # velocity: 0  # 目标速度
+  - id: 2      # 远离工控机电机ID
+    velocity: 0  # 目标速度
     # acceleration: 100 # 加速度
     # deceleration: 500 # 减速度
   
-  # - id: 4      # 滚刷电机ID
-    # velocity: 0  # 目标速度  1000 RPM
+  - id: 3      # 滚刷电机ID
+    velocity: 0  # 目标速度  1000 RPM
     # acceleration: 600 # 加速度
     # deceleration: 500 # 减速度

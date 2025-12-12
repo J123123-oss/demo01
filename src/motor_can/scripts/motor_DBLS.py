@@ -57,8 +57,8 @@ class ServoDriveController:
 
         # 初始化RTU客户端为None，避免空值报错
         self.rtu_client = None
-        self.motor_address_map = {1:1}
-        self.motor_pole_pairs = {1:5}
+        self.motor_address_map = {1:1,2:2,3:3}
+        self.motor_pole_pairs = {1:5,2:5,3:5}
 
         # 状态变量（保留原有）
         self.last_left_speed = 0
@@ -529,9 +529,9 @@ class ServoDriveController:
                 "battery_current": self.battery_current,
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                # "velocity_up": round(self.last_velocity_up * 20 / 24, 2),
+                "velocity_up": round(self.last_velocity_up * 20 / 24, 2),
                 "velocity_low": round(self.last_velocity_low * 20 / 24, 2),
-                # "velocity_brush": round(self.last_velocity_brush * 20 / 24, 2),
+                "velocity_brush": round(self.last_velocity_brush * 20 / 24, 2),
                 "sensors_status": self.sensors_status,
                 "device_status": {
                     "main_board": self.main_board,
@@ -847,9 +847,9 @@ class ServoDriveController:
             left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
 
             if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                # self.set_target_velocity(4, brush_speed)
+                self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -886,9 +886,9 @@ class ServoDriveController:
                 right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                    # self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(2, left_speed)
                     self.set_target_velocity(1, right_speed)
-                    # self.set_target_velocity(4, brush_speed)
+                    self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -905,9 +905,9 @@ class ServoDriveController:
                 left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 brush_speed = self.last_brush_speed
                 if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                    # self.set_target_velocity(3, left_speed)
+                    self.set_target_velocity(2, left_speed)
                     self.set_target_velocity(1, right_speed)
-                    # self.set_target_velocity(4, brush_speed)
+                    self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -924,9 +924,9 @@ class ServoDriveController:
             right_speed = self.last_right_speed
             brush_speed = -self.brush_base_speed
             if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                # self.set_target_velocity(4, brush_speed)
+                self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -935,9 +935,9 @@ class ServoDriveController:
             right_speed = 0
             brush_speed = -self.brush_base_speed
             if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                # self.set_target_velocity(4, brush_speed)
+                self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -960,9 +960,9 @@ class ServoDriveController:
             right_speed = int(self.status_config[self.current_status]["velocity_low"] + correction)
             brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
             if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                # self.set_target_velocity(4, brush_speed)
+                self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -973,9 +973,9 @@ class ServoDriveController:
             right_speed = int(self.status_config[self.current_status]["velocity_low"])
             brush_speed = int(self.status_config[self.current_status]["velocity_brush"])
             if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                # self.set_target_velocity(3, left_speed)
+                self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                # self.set_target_velocity(4, brush_speed)
+                self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed

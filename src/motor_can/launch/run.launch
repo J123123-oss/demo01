@@ -1,8 +1,8 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
 <!-- <arg name="robot_ID" default="GF-HZ-3F" /> -->
-<!-- <arg name="robot_ID" default="GF-HZ-2P-Indoor" /> -->
-<arg name="robot_ID" default="GF-HZ-VMware" />
+<arg name="robot_ID" default="HANGZHOU-FeiTeng-Motor" />
+<!-- <arg name="robot_ID" default="GF-HZ-VMware" /> -->
     <node pkg="motor_can" type="motor_DBLS.py" name="motor_DBLS" output="screen">
     <!-- <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen"> -->
 
@@ -32,12 +32,12 @@
         <!-- <param name="~relay_check_interval" value="11"/> -->
     <!-- </node> -->
     <!-- IMU单独节点 -->
-    <!-- <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/> -->
+    <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
     <!-- <node pkg="serial_comms" type="battery_weather_station.py" name="battery_weather_station" output="screen"/> -->
     <!-- 接近开关使用CAN协议 -->
     <!-- <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" /> -->
     <!-- 接近开关使用Modbus RTU协议 -->
-    <!-- <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor" /> -->
+    <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor" />
     <!-- 控制电缸节点 -->
     <!-- <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" /> -->
     <!-- 电池状态节点 -->
