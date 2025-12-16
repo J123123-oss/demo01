@@ -2,121 +2,169 @@
 # -*- coding: utf-8 -*-
 import rospy
 import time
+import subprocess
 from std_msgs.msg import Bool, UInt8
 from serial_comms.msg import Sensors
-# 引入香橙派GPIO库
-try:
-    import OrangePi.GPIO as GPIO
-except ImportError:
-    pass
-    # 兼容树莓派GPIO或香橙派wiringPi兼容模式
-    # import RPi.GPIO as GPIO
 
 
-class DigitalInputReader:
+class ProximitySensorReader:
     def __init__(self):
         rospy.init_node('proximity_input_reader')
         
         # 保留原有ROS参数（兼容原配置，无用参数仅保留不影响逻辑）
         self.device_address = rospy.get_param('~device_address', 1)
         self.can_interface = rospy.get_param('~can_interface', 'can0')
-        self.update_rate = rospy.get_param('~update_rate', 20.0)  # Hz
+        self.update_rate = rospy.get_param('~update_rate', 20.0)  # 轮询频率(Hz)
         self.baudrate = rospy.get_param('~baudrate', 1000000)
         self.request_baudrate = rospy.get_param('~request_baudrate', False)
 
-        # ========== GPIO配置（核心修改）==========
-        # 定义4个接近开关对应的GPIO引脚（wiringOP编号，可根据实际接线修改）
-        self.GPIO_PIN_SENSOR_A = 12  # 对应原sensor_a (通道1)
-        self.GPIO_PIN_SENSOR_B = 13  # 对应原sensor_b (通道7)
-        self.GPIO_PIN_SENSOR_C = 16  # 对应原sensor_c (通道3)
-        self.GPIO_PIN_SENSOR_D = 18  # 对应原sensor_d (通道5)
+        # ========== GPIO配置（核心）==========
+        # 定义两个接近开关对应的GPIO引脚（wiringOP编号，根据实际接线修改）
+        self.proximity_pins = {
+            'sensor_a': 5,   # 第一个接近开关GPIO（示例：5号引脚）
+            'sensor_b': 6    # 第二个接近开关GPIO（示例：6号引脚）
+            # 如需扩展可继续添加 sensor_c/sensor_d
+        }
         
-        # 初始化GPIO
-        self._init_gpio()
+        # GPIO初始化标志
+        self.gpio_initialized = False
+        
+        # 尝试初始化GPIO（最多重试3次）
+        for attempt in range(3):
+            try:
+                self._init_gpio()
+                self.gpio_initialized = True
+                break
+            except Exception as e:
+                rospy.logwarn(f"GPIO初始化尝试 {attempt+1}/3 失败: {str(e)}")
+                time.sleep(1)
+        
+        if not self.gpio_initialized:
+            rospy.logerr("无法初始化GPIO，设备可能被占用")
+            raise RuntimeError("GPIO初始化失败")
 
-        # 保留原发布器
+        # ROS发布器 - 发布接近开关状态
         self.all_inputs_pub = rospy.Publisher('proximity_sensor_data', Sensors, queue_size=1)
         
-        # 保留原定时器轮询逻辑
-        rospy.Timer(rospy.Duration(1.0 / self.update_rate), self.poll_inputs)
+        # 定时器轮询读取GPIO状态
+        rospy.Timer(rospy.Duration(1.0 / self.update_rate), self.poll_sensors)
+        
+        rospy.loginfo("接近开关读取器初始化完成")
 
     def _init_gpio(self):
-        """初始化GPIO为输入模式，启用内部上拉电阻"""
+        """初始化GPIO引脚为输入模式并启用上拉电阻（参考你的命令：gpio mode 5 in + gpio mode 5 up）"""
+        for sensor_name, pin in self.proximity_pins.items():
+            try:
+                # 设置引脚为输入模式
+                subprocess.run(
+                    ['gpio', 'mode', str(pin), 'in'],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                # 启用内部上拉电阻（和你的命令：gpio mode 5 up 一致）
+                subprocess.run(
+                    ['gpio', 'mode', str(pin), 'up'],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                rospy.loginfo(f"成功初始化 {sensor_name} (GPIO{pin}) 为输入模式+上拉电阻")
+            except subprocess.CalledProcessError as e:
+                rospy.logerr(f"初始化 {sensor_name} (GPIO{pin}) 失败: {e.stderr}")
+                raise Exception(f"GPIO{pin} 初始化失败")
+
+    def _read_gpio(self, pin):
+        """读取单个GPIO引脚状态，返回布尔值（True=按下/触发，False=未触发）"""
         try:
-            # 设置GPIO编号模式（wiringOP BOARD模式）
-            GPIO.setmode(GPIO.BOARD)
-            # 配置所有传感器GPIO为输入，启用上拉电阻
-            # 接近开关接线：开关一端接GPIO，另一端接GND
-            # 未触发时为高电平（True），触发时为低电平（False）
-            gpio_pins = [
-                self.GPIO_PIN_SENSOR_A,
-                self.GPIO_PIN_SENSOR_B,
-                self.GPIO_PIN_SENSOR_C,
-                self.GPIO_PIN_SENSOR_D
-            ]
-            for pin in gpio_pins:
-                GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            # 调用 gpio read 命令读取引脚值（返回 0/1）
+            result = subprocess.run(
+                ['gpio', 'read', str(pin)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            # 解析输出（去除换行符）
+            pin_value = int(result.stdout.strip())
             
-            rospy.loginfo("GPIO初始化成功，引脚配置：")
-            rospy.loginfo(f"Sensor A: PIN{self.GPIO_PIN_SENSOR_A}")
-            rospy.loginfo(f"Sensor B: PIN{self.GPIO_PIN_SENSOR_B}")
-            rospy.loginfo(f"Sensor C: PIN{self.GPIO_PIN_SENSOR_C}")
-            rospy.loginfo(f"Sensor D: PIN{self.GPIO_PIN_SENSOR_D}")
+            # 上拉模式下：0=触发（低电平），1=未触发（高电平），反转后更符合业务逻辑
+            return pin_value == 0
+        except subprocess.CalledProcessError as e:
+            rospy.logerr(f"读取GPIO{pin} 失败: {e.stderr}")
+            return False
+        except ValueError:
+            rospy.logerr(f"解析GPIO{pin} 数值失败: {result.stdout}")
+            return False
+
+    def poll_sensors(self, event):
+        """轮询读取所有接近开关状态并发布"""
+        if not self.gpio_initialized:
+            return
+            
+        try:
+            # 读取两个接近开关状态（消抖：连续读取两次取稳定值）
+            def read_stable(pin):
+                val1 = self._read_gpio(pin)
+                time.sleep(0.01)  # 10ms消抖
+                val2 = self._read_gpio(pin)
+                return val1 and val2  # 两次一致则确认状态
+            
+            # 读取传感器状态
+            sensor_a = read_stable(self.proximity_pins['sensor_a'])
+            sensor_b = read_stable(self.proximity_pins['sensor_b'])
+            # 如需扩展sensor_c/sensor_d，添加对应读取逻辑
+            # sensor_c = False  # 无则默认False
+            # sensor_d = False  # 无则默认False
+
+            # 封装并发布消息
+            self._publish_sensor_data(sensor_a, sensor_b)
             
         except Exception as e:
-            rospy.logerr(f"GPIO初始化失败: {str(e)}")
-            rospy.signal_shutdown("GPIO initialization failed")
+            rospy.logerr(f"轮询传感器状态失败: {str(e)}")
 
-    def poll_inputs(self, event):
-        """轮询读取GPIO状态（替代原CAN查询）"""
-        try:
-            # 读取各传感器GPIO状态（反转：低电平=触发=True）
-            sensor_a = not GPIO.input(self.GPIO_PIN_SENSOR_A)
-            sensor_b = not GPIO.input(self.GPIO_PIN_SENSOR_B)
-            sensor_c = not GPIO.input(self.GPIO_PIN_SENSOR_C)
-            sensor_d = not GPIO.input(self.GPIO_PIN_SENSOR_D)
-            
-            # 处理并发布数据（保留原逻辑）
-            self._process_input_data(sensor_a, sensor_b, sensor_c, sensor_d)
-            
-        except Exception as e:
-            rospy.logerr(f"读取GPIO状态出错: {str(e)}")
-
-    def _process_input_data(self, sensor_a, sensor_b, sensor_c, sensor_d):
-        """处理GPIO数据并发布（修改适配GPIO输入）"""
+    def _publish_sensor_data(self, sensor_a, sensor_b):
+        """封装Sensors消息并发布"""
         try:
             msg = Sensors()
-            # 直接赋值GPIO读取的状态（无需解析字节）
             msg.sensor_a = sensor_a
             msg.sensor_b = sensor_b
-            msg.sensor_c = sensor_c
-            msg.sensor_d = sensor_d
+            # msg.sensor_c = sensor_c
+            # msg.sensor_d = sensor_d
             
-            # 保留原发布逻辑
             self.all_inputs_pub.publish(msg)
-            rospy.logdebug(f"发布传感器数据: [A:{msg.sensor_a}, B:{msg.sensor_b}, C:{msg.sensor_c}, D:{msg.sensor_d}]")
-            
+            rospy.logdebug(f"发布接近开关状态: A={sensor_a}, B={sensor_b}")
         except Exception as e:
-            rospy.logerr(f"处理传感器数据出错: {str(e)}")
+            rospy.logerr(f"发布传感器数据失败: {str(e)}")
 
-    def run(self):
-        """保留原运行逻辑"""
-        rospy.spin()
-
-    def shutdown(self):
-        """关闭GPIO资源（替代原CAN关闭）"""
-        try:
-            GPIO.cleanup()  # 释放所有GPIO资源
-            rospy.loginfo("GPIO资源已释放")
-        except Exception as e:
-            rospy.logerr(f"关闭GPIO出错: {str(e)}")
+    def cleanup(self):
+        """安全清理GPIO资源"""
+        if self.gpio_initialized:
+            for sensor_name, pin in self.proximity_pins.items():
+                try:
+                    # 将引脚恢复为输入模式（可选）
+                    subprocess.run(
+                        ['gpio', 'mode', str(pin), 'in'],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    rospy.loginfo(f"已清理 {sensor_name} (GPIO{pin}) 资源")
+                except Exception as e:
+                    rospy.logerr(f"清理 {sensor_name} (GPIO{pin}) 失败: {str(e)}")
+        rospy.loginfo("接近开关读取器已关闭")
 
 if __name__ == '__main__':
+    reader = None
     try:
-        node = DigitalInputReader()
-        node.run()
+        reader = ProximitySensorReader()
+        rospy.spin()
     except rospy.ROSInterruptException:
-        pass
+        rospy.loginfo("程序被用户中断")
+    except Exception as e:
+        rospy.logerr(f"节点运行错误: {str(e)}")
     finally:
-        if 'node' in locals():
-            node.shutdown()
+        if reader:
+            reader.cleanup()
+        rospy.loginfo("接近开关读取器已退出")

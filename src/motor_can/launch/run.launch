@@ -17,19 +17,22 @@
 
     </node>
     <!-- <node pkg="serial_comms" type="battery_imu_node.py" name="battery_imu_node"  /> -->
-    <node pkg="serial_comms" type="relay_battery.py" name="relay_battery" output="screen" >
+    <!-- <node pkg="serial_comms" type="relay_battery.py" name="relay_battery" output="screen" > -->
     <!-- 高温阈值  |    低温阈值  |    检查间隔 -->
         <param name="~temperature_threshold_high" value="5.0"/>
         <param name="~temperature_threshold_low" value="-15.0"/>
         <param name="~battery_check_interval" value="10"/>
         <param name="~relay_check_interval" value="11"/>
-    </node>
+    <!-- </node> -->
     <!-- IMU单独节点 -->
     <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
     <!-- 接近开关使用CAN协议 -->
-    <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" />
+    <!-- <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" /> -->
+    <!-- 接近开关使用GPIO 5/6 -->
+    <node pkg="serial_comms" type="proximity_gpio.py" name="proximity_gpio" />
+    
     <!-- 控制电缸节点 -->
-    <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" />
+    <!-- <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" /> -->
     <!-- 电池状态节点 -->
     <!-- <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" output="screen" /> -->
 
