@@ -105,7 +105,6 @@ class IMUParser:
         full_cmd = cmd + crc
         # 发送指令
         self.safe_serial_write(full_cmd)
-        print(full_cmd)
 
     def parse_response(self, data):
         """解析返回的三轴角度数据"""
