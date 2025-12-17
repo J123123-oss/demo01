@@ -556,9 +556,9 @@ class ServoDriveController:
         try:
             self.velocity_publish_count += 1
             if self.velocity_publish_count >= self.velocity_publish_interval and self.rtu_client is not None:
-                # self.last_velocity_up = self.get_actual_velocity(2)
-                # self.last_velocity_low = self.get_actual_velocity(1)
-                # self.last_velocity_brush = self.get_actual_velocity(3)
+                self.last_velocity_up = self.get_actual_velocity(2)
+                self.last_velocity_low = self.get_actual_velocity(1)
+                self.last_velocity_brush = self.get_actual_velocity(3)
                 self.velocity_publish_count = 0
 
             # 构建状态消息
@@ -570,9 +570,9 @@ class ServoDriveController:
                 "battery_current": self.battery_current,
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                # "velocity_up": round(self.last_velocity_up * 20 / 24, 2),
-                # "velocity_low": round(self.last_velocity_low * 20 / 24, 2),
-                # "velocity_brush": round(self.last_velocity_brush * 20 / 24, 2),
+                "velocity_up": round(self.last_velocity_up, 2),
+                "velocity_low": round(self.last_velocity_low, 2),
+                "velocity_brush": round(self.last_velocity_brush, 2),
                 "sensors_status": self.sensors_status,
                 "device_status": {
                     "main_board": self.main_board,
