@@ -1,4 +1,5 @@
 KERNEL=="ttyUSB*" ,KERNELS=="4-1" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="IMU"
+KERNEL=="ttyUSB*" ,KERNELS=="4-1" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="Motor-DBLS"
 
 #KERNEL=="ttyUSB*" ,KERNELS=="5-1.3" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="battery-weather"
 #KERNEL=="ttyUSB*" ,KERNELS=="5-1.1" ,ATTRS{idProduct}=="7523" ,ATTRS{idVendor}=="1a86" ,MODE:="0777" ,SYMLINK+="WTRTK"

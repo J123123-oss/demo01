@@ -1,173 +1,151 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-#!/usr/bin/env python3
 import rospy
-import serial
-from std_msgs.msg import Float32
-from serial_comms.msg import BatteryStatus  #导入自定义类型
+import time
+from pymodbus.client import ModbusSerialClient
+from pymodbus.payload import BinaryPayloadDecoder
+from pymodbus.constants import Endian
+from serial_comms.msg import BatteryStatus  # 导入自定义msg
 
-class BatteryMonitor:
-    def __init__(self, port, baudrate=9600):
+class BatteryModbusROS:
+    """ROS版电池Modbus RTU监控节点"""
+    def __init__(self):
+        # 1. 初始化ROS节点
+        rospy.init_node('battery_modbus_node', anonymous=True)
+        
+        # 2. 获取ROS参数（支持launch文件配置）
+        self.port = rospy.get_param('~serial_port', '/dev/ttyUSB0')  # 默认Linux串口
+        self.baudrate = rospy.get_param('~baudrate', 9600)
+        self.slave_id = rospy.get_param('~slave_id', 1)
+        self.query_freq = rospy.get_param('~query_frequency', 0.2)  # 0.2Hz = 5秒/次
+        
+        # 3. 初始化Modbus客户端
+        self.client = ModbusSerialClient(
+            port=self.port,
+            baudrate=self.baudrate,
+            parity='N',
+            stopbits=1,
+            bytesize=8,
+            timeout=1
+        )
+        
+        # 4. 创建发布者，话题名/battery_status，队列大小10
+        self.pub = rospy.Publisher('/battery_status', BatteryStatus, queue_size=10)
+        
+        # 5. 连接Modbus设备
+        if not self.client.connect():
+            rospy.logerr("Modbus RTU连接失败！请检查串口/硬件连接")
+            rospy.signal_shutdown("连接失败")
+        
+        rospy.loginfo("电池监控节点初始化完成，开始5秒周期查询...")
+
+    def decode_mos_state(self, charge_mos, discharge_mos):
+        """
+        编码MOS状态到uint8：
+        bit0: 充电MOS（0=关闭，1=开启）
+        bit1: 放电MOS（0=关闭，1=开启）
+        示例：充电开+放电关 → 0b01 → 1；充电关+放电开 → 0b10 → 2；都开 → 0b11 →3
+        """
+        mos_state = 0
+        if charge_mos == 1:
+            mos_state |= 0x01  # 置位bit0
+        if discharge_mos == 1:
+            mos_state |= 0x02  # 置位bit1
+        return mos_state
+
+    def read_all_data(self):
+        """读取所有Modbus数据并封装为ROS msg"""
+        msg = BatteryStatus()
+        
+        # ========== 1. 读取电量信息 ==========
         try:
-            self.ser = serial.Serial(port, baudrate, timeout=1)
-            rospy.loginfo(f"Connected to serial port: {port}")
-        except serial.SerialException as e:
-            rospy.logerr(f"串口连接失败: {e}")
-            rospy.signal_shutdown("串口错误")
-            return
-        
-        # 创建发布器
-        self.status_pub = rospy.Publisher('/battery_status', BatteryStatus, queue_size=10)
-        
-        # 03指令请求帧 (DDA50300FFFD77)
-        self.REQUEST_BASIC_FRAME = bytes.fromhex('DD A5 03 00 FF FD 77')
-        # 开关测试继电器温控
-        # self.REQUEST_BASIC_FRAME = bytes.fromhex('02 05 00 00 FF 00 8C 09')
-        # self.REQUEST_BASIC_FRAME = bytes.fromhex('02 05 00 00 00 00 CD F9')
-        # 继电器状态查询
-        # self.REQUEST_BASIC_FRAME = bytes.fromhex('02 01 00 00 00 08 3D FF')
-
-
-
-    def parse_date(self, raw_date):
-        """解析生产日期 (2字节数据)"""
-        value = (raw_date[0] << 8) | raw_date[1]
-        day = value & 0x1F
-        month = (value >> 5) & 0x0F
-        year = 2000 + (value >> 9)
-        return year, month, day
-
-    def parse_current(self, data_bytes):
-        """解析电流值 (2字节数据)"""
-        value = (data_bytes[0] << 8) | data_bytes[1]
-        if value >= 0x8000:  # 最高位为1表示放电(负电流)
-            return (value - 65536) * 0.01  # 转换为安培(A)
-        return value * 0.01  # 转换为安培(A)
-
-    def process_response(self, data):
-        """解析响应数据帧并发布完整状态"""
-        # 创建自定义消息对象
-        status_msg = BatteryStatus()
-        
-        try:
-            # 1. 总电压 (2字节, 单位10mV)
-            status_msg.total_voltage = ((data[0] << 8) | data[1]) * 0.01  # 转换为伏特(V)
-            print("status_msg.total_voltage:",status_msg.total_voltage)
-            
-            # 2. 电流 (2字节, 带符号处理)
-            status_msg.current = self.parse_current(data[2:4])
-            print("status_msg.current:",status_msg.current)
-            
-            # 3. 容量信息 (4字节)
-            status_msg.remaining_capacity = ((data[4] << 8) | data[5]) * 0.01  # 转换为安时(Ah)
-            status_msg.nominal_capacity = ((data[6] << 8) | data[7]) * 0.01    # 转换为安时(Ah)
-            
-            # 4. 循环次数 (2字节)
-            status_msg.cycle_count = (data[8] << 8) | data[9]
-            
-            # 5. 生产日期 (2字节)
-            year, month, day = self.parse_date(data[10:12])
-            status_msg.production_year = year
-            status_msg.production_month = month
-            status_msg.production_day = day
-            
-            # 6. 均衡状态 (4字节)
-            status_msg.balance_low = (data[12] << 8) | data[13]
-            status_msg.balance_high = (data[14] << 8) | data[15]
-            
-            # 7. 保护状态 (2字节)
-            status_msg.protection_status = (data[16] << 8) | data[17]
-            
-            # 8. 软件版本 (1字节)
-            version_major = data[18] >> 4
-            version_minor = data[18] & 0x0F
-            status_msg.software_version = f"{version_major}.{version_minor}"
-            
-            # 9. 电量百分比 (1字节)
-            status_msg.batttery_remaining = data[19]  # 0-100%
-            print("status_msg.batttery_remaining:",status_msg.batttery_remaining)
-            
-            # 10. 温度数据解析
-            ntc_count = data[22]  # 温度传感器数量
-            for i in range(ntc_count):
-                index = 23 + i * 2
-                raw_temp = (data[index] << 8) | data[index + 1]
-                # 转换为摄氏度: T = (raw_value - 2731) / 10.0
-                temperature = (raw_temp - 2731) / 10.0
-                #保留一位小数
-                temperature = round(temperature, 1)  
-                status_msg.temperatures.append(temperature)
-            
-            # 发布完整状态消息
-            self.status_pub.publish(status_msg)
-            # rospy.loginfo("Battery status published successfully")
-            
-        except IndexError as e:
-            rospy.logerr(f"数据解析错误: 响应长度不足 ({len(data)} bytes)")
+            # 读取0000H-0002H（地址0-2）
+            resp_power = self.client.read_holding_registers(0, 3, self.slave_id)
+            if not resp_power.isError():
+                decoder = BinaryPayloadDecoder.fromRegisters(
+                    resp_power.registers, Endian.Big, Endian.Big
+                )
+                # 剩余电量百分比（0.01%单位）
+                msg.batttery_remaining = decoder.decode_16bit_uint() * 0.01
+                # 总电流（0.01A单位，有符号）
+                msg.current = decoder.decode_16bit_int() * 0.01
+                # 总电压（0.01V单位）
+                msg.total_voltage = decoder.decode_16bit_uint() * 0.01
+            else:
+                rospy.logwarn("读取电量信息失败: %s", resp_power)
         except Exception as e:
-            rospy.logerr(f"处理响应时出错: {e}")
-
-    def read_battery_data(self):
-        """读取并处理数据帧"""
-        # 读取帧头 (1字节)
-        frame = self.ser.read(1)
-        if frame != b'\xdd':
-            return False
+            rospy.logerr("电量信息读取异常: %s", e)
         
-        # 命令码 (1字节)
-        command = self.ser.read(1)
-        if command != b'\x03':  # 只处理基本信息响应
-            return False
-            
-        # 状态码 (1字节)
-        status = self.ser.read(1)
-        if status != b'\x00':   # 0 表示正确
-            rospy.logwarn(f"设备返回错误状态: 0x{status.hex()}")
-            return False
+        # ========== 2. 读取MOS管状态 ==========
+        try:
+            # 读取000AH-000BH（地址10-11）
+            resp_mos = self.client.read_holding_registers(10, 2, self.slave_id)
+            if not resp_mos.isError():
+                charge_mos = resp_mos.registers[0]
+                discharge_mos = resp_mos.registers[1]
+                # 编码MOS状态到uint8
+                msg.mos_state = self.decode_mos_state(charge_mos, discharge_mos)
+            else:
+                rospy.logwarn("读取MOS状态失败: %s", resp_mos)
+        except Exception as e:
+            rospy.logerr("MOS状态读取异常: %s", e)
         
-        # 数据长度 (1字节)
-        data_length = self.ser.read(1)[0]
+        # ========== 3. 读取温度信息 ==========
+        try:
+            # 读取005FH-0061H（地址95-97）
+            resp_temp = self.client.read_holding_registers(95, 3, self.slave_id)
+            if not resp_temp.isError():
+                decoder = BinaryPayloadDecoder.fromRegisters(
+                    resp_temp.registers, Endian.Big, Endian.Big
+                )
+                # 温度数组：[第16路电池温度, PCB温度, 环境温度]
+                temp_16 = decoder.decode_16bit_int() * 0.1
+                temp_pcb = decoder.decode_16bit_int() * 0.1
+                temp_env = decoder.decode_16bit_int() * 0.1
+                msg.temperatures = [temp_16, temp_pcb, temp_env]
+            else:
+                rospy.logwarn("读取温度信息失败: %s", resp_temp)
+        except Exception as e:
+            rospy.logerr("温度信息读取异常: %s", e)
         
-        # 读取数据块
-        data = self.ser.read(data_length)
+        # 剩余容量（协议未提供原始值，暂设为0，可根据实际寄存器补充）
+        msg.remaining_capacity = 0.0
         
-        # 读取校验和 (2字节) 和帧尾 (1字节)
-        checksum = self.ser.read(2)
-        end_marker = self.ser.read(1)
-        
-        if end_marker == b'\x77':
-            self.process_response(data)
-            return True
-        
-        return False
+        return msg
 
     def run(self):
-        """主循环"""
-        rate = rospy.Rate(1)  # 1Hz
+        """主循环：5秒发布一次数据"""
+        rate = rospy.Rate(self.query_freq)  # 0.2Hz = 5秒/次
         while not rospy.is_shutdown():
-            try:
-                # 发送基本信息请求
-                self.ser.write(self.REQUEST_BASIC_FRAME)
-                rospy.sleep(0.05)  # 等待响应
-                
-                # 检查并读取响应
-                if self.ser.in_waiting > 0:
-                    self.read_battery_data()
-                    
-            except serial.SerialException as e:
-                rospy.logerr(f"串口通信错误: {e}")
-                rospy.signal_shutdown("串口故障")
-            except Exception as e:
-                rospy.logerr(f"运行时错误: {e}")
-                
+            # 读取所有数据
+            battery_msg = self.read_all_data()
+            # 发布消息
+            self.pub.publish(battery_msg)
+            # 打印日志（可选）
+            rospy.loginfo("\n发布电池状态：")
+            rospy.loginfo(f"剩余电量: {battery_msg.batttery_remaining:.2f}%")
+            rospy.loginfo(f"总电压: {battery_msg.total_voltage:.2f}V")
+            rospy.loginfo(f"总电流: {battery_msg.current:.2f}A")
+            rospy.loginfo(f"温度: {battery_msg.temperatures}°C")
+            rospy.loginfo(f"MOS状态: 0x{battery_msg.mos_state:02x}")
+            
+            # 等待周期
             rate.sleep()
+        
+        # 关闭连接
+        self.client.close()
+        rospy.loginfo("节点关闭，Modbus连接已断开")
 
 if __name__ == '__main__':
-    rospy.init_node('battery_monitor')
-    port = rospy.get_param('~serial_port', '/dev/ttyUSB0')
-    monitor = BatteryMonitor(port)
-    
     try:
-        monitor.run()
+        # 安装pymodbus（若未安装）
+        # import subprocess
+        # import sys
+        # subprocess.check_call([sys.executable, "-m", "pip", "install", "pymodbus"])
+        
+        # 启动节点
+        battery_node = BatteryModbusROS()
+        battery_node.run()
     except rospy.ROSInterruptException:
-        pass
+        rospy.loginfo("节点被中断")
+    except Exception as e:
+        rospy.logerr("节点启动失败: %s", e)
