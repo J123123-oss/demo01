@@ -72,8 +72,8 @@ class ServoDriveController:
         self.main_board = True
         self.imu_sensor = True
         self.motor_driver = True
-        self.motor_base = 1
-        self.base_speed = 1
+        self.motor_base = 2
+        self.base_speed = 2
         self.brush_base_speed = 4
         self.flag = 0
         self.speed_pluse_max = 2 * RATE
