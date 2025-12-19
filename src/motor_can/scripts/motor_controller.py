@@ -16,10 +16,11 @@ class MotorController:
         self.driver_manager = driver_manager  # 驱动管理器实例
         self.rate = rospy.Rate(20)
 
-        # 基础配置参数
-        self.motor_base = 2
-        self.brush_base_speed = 4
-        self.speed_pluse_max = 2 * RATE
+        # 基础配置参数motor_base
+        self.motor_base = 800
+        self.brush_base_speed = 1200
+        self.flag = 0
+        self.speed_pluse_max = 800 * RATE
         self.REVERSE_TIME_THRESHOLD = 3.0
         self.UNLOADING_TIMER = 0.1
         self.LOW_BATTERY_THRESHOLD = 40
@@ -68,10 +69,10 @@ class MotorController:
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0
-        self.pid_kp = 1
+        self.pid_kp = 80
         self.pid_ki = 0
-        self.pid_kd = 0.1
-        self.pid_correction_max = 1
+        self.pid_kd = 3
+        self.pid_correction_max = 100
 
         # 状态切换锁
         self.state_switch_lock = threading.Lock()

@@ -89,6 +89,59 @@ class MotorDriver:
             self.connection_status = False
             return self.reconnect()
         return True
+    def rtu_write_register(self, motor_id, reg_addr, value):
+        """RTU写寄存器（增加空值判断）"""
+        # 先检查客户端是否有效
+        if self.rtu_client is None or not self.rtu_client.is_socket_open():
+            rospy.logerr("❌ RTU客户端未连接，无法写寄存器")
+            if not self.reconnect_rtu_client():
+                return False
+        
+        rtu_addr = self.motor_address_map.get(motor_id)
+        if rtu_addr is None: 
+            rospy.logerr(f"❌ 电机ID {motor_id} 无对应RTU站点")
+            return False
+        
+        try:
+            time.sleep(COMMAND_INTERVAL)
+            response = self.rtu_client.write_register(reg_addr, value, slave=rtu_addr)
+            if not response.isError():
+                rospy.logdebug(f"✅ 电机{motor_id}写寄存器0x{reg_addr:04X}成功：0x{value:04X}")
+                return True
+            rospy.logerr(f"❌ RTU写寄存器失败：电机{motor_id}，地址0x{reg_addr:04X}，错误{response}")
+            self.reconnect_rtu_client()
+            return False
+        except Exception as e:
+            rospy.logerr(f"❌ RTU写操作异常：{e}")
+            self.reconnect_rtu_client()
+            return False
+
+    def rtu_read_register(self, motor_id, reg_addr, count=1):
+        """RTU读寄存器（增加空值判断）"""
+        # 先检查客户端是否有效
+        if self.rtu_client is None or not self.rtu_client.is_socket_open():
+            rospy.logerr("❌ RTU客户端未连接，无法读寄存器")
+            if not self.reconnect_rtu_client():
+                return None
+        
+        rtu_addr = self.motor_address_map.get(motor_id)
+        if rtu_addr is None: 
+            rospy.logerr(f"❌ 电机ID {motor_id} 无对应RTU站点")
+            return None
+        
+        try:
+            time.sleep(COMMAND_INTERVAL)
+            response = self.rtu_client.read_holding_registers(reg_addr, count, slave=rtu_addr)
+            if not response.isError():
+                rospy.logdebug(f"✅ 电机{motor_id}读寄存器0x{reg_addr:04X}成功：{response.registers}")
+                return response.registers
+            rospy.logerr(f"❌ RTU读寄存器失败：电机{motor_id}，地址0x{reg_addr:04X}，错误{response}")
+            self.reconnect_rtu_client()
+            return None
+        except Exception as e:
+            rospy.logerr(f"❌ RTU读操作异常：{e}")
+            self.reconnect_rtu_client()
+            return None
 
     def write_register(self, reg_addr, value):
         """写寄存器（硬件层面）"""
@@ -133,25 +186,65 @@ class MotorDriver:
         control_value = (high_byte << 8) | low_byte
         return self.write_register(REG_CONTROL_MODE, control_value)
 
-    def set_speed(self, velocity):
-        """设置电机速度（RPM）"""
+    def set_target_velocity(self, motor_id, velocity):
+        """设置电机速度（适配小端序：将速度值转为小端序后再发送）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法设置速度")
+            return False
+        
+        # 1. 基础速度值处理（原有逻辑）
         velocity_abs = abs(velocity)
-        velocity_abs = max(min(velocity_abs, 65535), 0)  # 限制范围
+        velocity_abs = max(min(velocity_abs, 65535), 0)
         direction = 1 if velocity < 0 else 0
-        # 先写速度寄存器，再设置方向
-        if self.write_register(REG_SPEED_SET, velocity_abs):
-            return self.set_control_mode(enable=True, direction=direction, brake=False)
-        return False
 
-    def get_actual_speed(self):
-        """获取实际转速（RPM）"""
-        registers = self.read_register(REG_ACTUAL_SPEED, count=1)
+        # 2. 将速度值转为小端序（16位整数高低位互换）
+        # 原理：大端序是 高位字节<<8 + 低位字节；小端序是 低位字节<<8 + 高位字节
+        velocity_low = velocity_abs & 0xFF        # 提取低位字节（0-255）
+        velocity_high = (velocity_abs >> 8) & 0xFF # 提取高位字节（0-255）
+        velocity_little_endian = (velocity_low << 8) | velocity_high  # 小端序值
+
+        # 3. 发送小端序的速度值（替换原有velocity_abs）
+        success = self.rtu_write_register(motor_id, REG_SPEED_SET, velocity_little_endian)
+        
+        if success:
+            self.set_control_mode(motor_id, enable=True, direction=direction)
+            rospy.loginfo(f"✅ 电机{motor_id}速度设置成功：{velocity} ")
+            current_direction = self.motor_control_state.get(motor_id, {}).get("direction", 0)
+        
+        # 4. 方向校验（原有逻辑保留）
+        if direction != current_direction:
+            mode_success = self.set_control_mode(motor_id, enable=True, direction=direction, brake=False)
+            if not mode_success:
+                rospy.logerr(f"❌ 电机{motor_id}方向修改失败")
+                return False
+        
+        return success
+
+    def get_actual_velocity(self, motor_id):
+        """读取实际转速（增加空值保护）"""
+        if self.rtu_client is None:
+            rospy.logerr("❌ RTU客户端未连接，无法读取转速")
+            return 0
+        
+        registers = self.rtu_read_register(motor_id, REG_ACTUAL_SPEED, count=1)
         if not registers or len(registers) != 1:
-            rospy.logwarn(f"⚠️ 电机{self.motor_id}转速读取失败")
-            return 0.0
-        speed_code = registers[0]
-        actual_speed = (speed_code * 20) / self.pole_pairs
-        return round(max(min(actual_speed, 65535), 0), 2)
+            rospy.logwarn(f"⚠️ 读取电机{motor_id}转速失败")
+            return 0
+        
+        speed_code_little = registers[0]
+    
+        # 2. 核心：小端序解析为真实原始值（高低位互换）
+        # 原理：驱动器返回的speed_code_little是小端序（低位字节<<8 + 高位字节），需还原为大端序原始值
+        speed_high= speed_code_little & 0xFF        # 提取小端序的低位字节
+        speed_low= (speed_code_little >> 8) & 0xFF # 提取小端序的高位字节
+        speed_code_big = (speed_high << 8) | speed_low  # 还原
+
+        pole_pairs = self.motor_pole_pairs.get(motor_id, 5)
+        actual_speed = (speed_code_big * pole_pairs) / 20
+        # actual_speed = max(min(actual_speed, 65535), 0)
+        print(f"{motor_id}电机转速：{actual_speed}")
+        
+        return round(actual_speed, 2)
 
     def get_fault_info(self):
         """获取故障信息"""

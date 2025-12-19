@@ -13,6 +13,7 @@ from std_srvs.srv import Trigger
 from pymodbus.client import ModbusSerialClient
 from pymodbus.payload import BinaryPayloadBuilder, BinaryPayloadDecoder
 from pymodbus.constants import Endian as ModbusEndian  
+import serial 
 
 # -------------------------- 驱动器核心配置 --------------------------
 BAUDRATE = 38400
@@ -72,11 +73,10 @@ class ServoDriveController:
         self.main_board = True
         self.imu_sensor = True
         self.motor_driver = True
-        self.motor_base = 2
-        self.base_speed = 2
-        self.brush_base_speed = 4
+        self.motor_base = 400
+        self.brush_base_speed = 800
         self.flag = 0
-        self.speed_pluse_max = 2 * RATE
+        self.speed_pluse_max = 800 * RATE
         self.reversed_start_time = None
         self.REVERSE_TIME_THRESHOLD = 3.0
         self.unloading_timer = 0.1
@@ -102,7 +102,7 @@ class ServoDriveController:
         self.startup_time = None
         self.state_change_protect_delay = 5.0
         self.last_state_change_time = 0.0  # 记录上次状态切换时间
-        self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
+        self.GLOBAL_REPEAT_DELAY = 5.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
 
         self.motor_control_state = {}  # 缓存格式：{motor_id: {"enable": bool, "direction": int, "brake": bool}}
@@ -123,8 +123,8 @@ class ServoDriveController:
             "STOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": 0},
             "UNLOADING": {"velocity_up": -self.motor_base * RATE, "velocity_low": self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
             "FORWARD": {"velocity_up": self.motor_base * RATE, "velocity_low": -self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
-            "BACKWARD": {"velocity_up": -self.motor_base * RATE, "velocity_low": self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
-            "LOADING": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
+            "BACKWARD": {"velocity_up": -self.motor_base * RATE, "velocity_low": self.motor_base * RATE, "velocity_brush": self.brush_base_speed},
+            "LOADING": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": 0},
             "PAUSE": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
             "UPSTOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
             "LOWSTOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
@@ -165,10 +165,10 @@ class ServoDriveController:
         self.pid_integral = 0.0
         self.pid_last_error = 0.0
         self.target_yaw = 0.0
-        self.pid_kp = 1
+        self.pid_kp = 80
         self.pid_ki = 0
-        self.pid_kd = 0.1
-        self.pid_correction_max = 1
+        self.pid_kd = 3
+        self.pid_correction_max = 100
         self.progress = 0
         self.battery_total_voltage = None
         self.battery_current = None
@@ -351,26 +351,37 @@ class ServoDriveController:
         return success
 
     def set_target_velocity(self, motor_id, velocity):
-        """设置电机速度（增加空值保护）"""
+        """设置电机速度（适配小端序：将速度值转为小端序后再发送）"""
         if self.rtu_client is None:
             rospy.logerr("❌ RTU客户端未连接，无法设置速度")
             return False
         
+        # 1. 基础速度值处理（原有逻辑）
         velocity_abs = abs(velocity)
         velocity_abs = max(min(velocity_abs, 65535), 0)
         direction = 1 if velocity < 0 else 0
+
+        # 2. 将速度值转为小端序（16位整数高低位互换）
+        # 原理：大端序是 高位字节<<8 + 低位字节；小端序是 低位字节<<8 + 高位字节
+        velocity_low = velocity_abs & 0xFF        # 提取低位字节（0-255）
+        velocity_high = (velocity_abs >> 8) & 0xFF # 提取高位字节（0-255）
+        velocity_little_endian = (velocity_low << 8) | velocity_high  # 小端序值
+
+        # 3. 发送小端序的速度值（替换原有velocity_abs）
+        success = self.rtu_write_register(motor_id, REG_SPEED_SET, velocity_little_endian)
         
-        success = self.rtu_write_register(motor_id, REG_SPEED_SET, velocity_abs)
         if success:
             self.set_control_mode(motor_id, enable=True, direction=direction)
-            rospy.loginfo(f"✅ 电机{motor_id}速度设置成功：{velocity} RPM")
+            rospy.loginfo(f"✅ 电机{motor_id}速度设置成功：{velocity} ")
             current_direction = self.motor_control_state.get(motor_id, {}).get("direction", 0)
+        
+        # 4. 方向校验（原有逻辑保留）
         if direction != current_direction:
-            # 保持使能=True，刹车=False，仅修改方向
             mode_success = self.set_control_mode(motor_id, enable=True, direction=direction, brake=False)
             if not mode_success:
                 rospy.logerr(f"❌ 电机{motor_id}方向修改失败")
                 return False
+        
         return success
 
     def get_actual_velocity(self, motor_id):
@@ -384,11 +395,18 @@ class ServoDriveController:
             rospy.logwarn(f"⚠️ 读取电机{motor_id}转速失败")
             return 0
         
-        speed_code = registers[0]
+        speed_code_little = registers[0]
+    
+        # 2. 核心：小端序解析为真实原始值（高低位互换）
+        # 原理：驱动器返回的speed_code_little是小端序（低位字节<<8 + 高位字节），需还原为大端序原始值
+        speed_high= speed_code_little & 0xFF        # 提取小端序的低位字节
+        speed_low= (speed_code_little >> 8) & 0xFF # 提取小端序的高位字节
+        speed_code_big = (speed_high << 8) | speed_low  # 还原
+
         pole_pairs = self.motor_pole_pairs.get(motor_id, 5)
-        actual_speed = (speed_code * 20) / pole_pairs
-        actual_speed = max(min(actual_speed, 65535), 0)
-        # print(f"{motor_id}电机转速：{actual_speed}")
+        actual_speed = (speed_code_big * pole_pairs) / 20
+        # actual_speed = max(min(actual_speed, 65535), 0)
+        print(f"{motor_id}电机转速：{actual_speed}")
         
         return round(actual_speed, 2)
 
@@ -405,6 +423,7 @@ class ServoDriveController:
         
         fault_16 = registers[0]
         fault_code = (fault_16 >> 8) & 0xFF
+        # print(f"读取电机{motor_id}故障码{fault_code}")
         fault_desc = FAULT_MAP.get(fault_code, f"未知故障（0x{fault_code:02X}）")
         
         if fault_code != 0x00:
@@ -556,9 +575,9 @@ class ServoDriveController:
         try:
             self.velocity_publish_count += 1
             if self.velocity_publish_count >= self.velocity_publish_interval and self.rtu_client is not None:
-                self.last_velocity_up = self.get_actual_velocity(2)
-                self.last_velocity_low = self.get_actual_velocity(1)
-                self.last_velocity_brush = self.get_actual_velocity(3)
+                # self.last_velocity_up = self.get_actual_velocity(2)
+                # self.last_velocity_low = self.get_actual_velocity(1)
+                # self.last_velocity_brush = self.get_actual_velocity(3)
                 self.velocity_publish_count = 0
 
             # 构建状态消息
@@ -570,9 +589,9 @@ class ServoDriveController:
                 "battery_current": self.battery_current,
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                "velocity_up": round(self.last_velocity_up, 2),
-                "velocity_low": round(self.last_velocity_low, 2),
-                "velocity_brush": round(self.last_velocity_brush, 2),
+                # "velocity_up": round(self.last_velocity_up * 20 / 24, 2),
+                # "velocity_low": round(self.last_velocity_low * 20 / 24, 2),
+                # "velocity_brush": round(self.last_velocity_brush * 20 / 24, 2),
                 "sensors_status": self.sensors_status,
                 "device_status": {
                     "main_board": self.main_board,
@@ -903,7 +922,7 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
             # 角度偏差检测
-            angle_condition_met = (-5 < self.imu_yaw < -2.5 or 2.5 < self.imu_yaw < 5)
+            angle_condition_met = (-7 < self.imu_yaw < -3.5 or 3.5 < self.imu_yaw < 7)
             if angle_condition_met:
                 if self.reversed_start_time is None:
                     self.reversed_start_time = rospy.get_time()
@@ -946,9 +965,9 @@ class ServoDriveController:
             else:
                 self.flag = -1 if self.imu_yaw >= 0 else 1
                 if abs(self.imu_yaw) > 1:
-                    right_speed = left_speed = int(-self.base_speed * RATE * 0.8 * self.flag)
+                    right_speed = left_speed = int(-self.motor_base * RATE * 0.8 * self.flag)
                 else:
-                    right_speed = left_speed = int(-self.base_speed * RATE * 0.6 * self.flag)
+                    right_speed = left_speed = int(-self.motor_base * RATE * 0.6 * self.flag)
                 right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 brush_speed = self.last_brush_speed
@@ -970,25 +989,25 @@ class ServoDriveController:
         elif self.current_status == "UPSTOP":
             left_speed = 0
             right_speed = self.last_right_speed
-            brush_speed = -self.brush_base_speed
-            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+            # brush_speed = -self.brush_base_speed
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed ):
                 self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                self.set_target_velocity(3, brush_speed)
+                # self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
-                self.last_brush_speed = brush_speed
+                # self.last_brush_speed = brush_speed
         elif self.current_status == "LOWSTOP":
             left_speed = self.last_left_speed
             right_speed = 0
-            brush_speed = -self.brush_base_speed
-            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+            # brush_speed = -self.brush_base_speed
+            if (self.last_left_speed != left_speed or self.last_right_speed != right_speed ):
                 self.set_target_velocity(2, left_speed)
                 self.set_target_velocity(1, right_speed)
-                self.set_target_velocity(3, brush_speed)
+                # self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
-                self.last_brush_speed = brush_speed
+                # self.last_brush_speed = brush_speed
 
         # STOP
         elif self.current_status == "STOP" or not -5 < self.imu_yaw < 5:
@@ -1056,14 +1075,16 @@ class ServoDriveController:
         while self.heartbeat_running and not rospy.is_shutdown():
             if self.rtu_client is None:
                 time.sleep(interval)
-                continue
-            speed = self.get_actual_velocity(motor_id)
-            if speed is None:
-                rospy.logwarn(f"❤️ 电机 {motor_id} 通讯异常")
-                self.motor_driver = False
                 self.reconnect_rtu_client()
-            else:
-                self.motor_driver = True
+                continue
+            fault_code = self.read_fault_code(motor_id)
+            # speed = self.get_actual_velocity(motor_id)
+            # if speed is None:
+                # rospy.logwarn(f"❤️ 电机 {motor_id} 通讯异常")
+                # self.motor_driver = False
+                # self.reconnect_rtu_client()
+            # else:
+                # self.motor_driver = True
             time.sleep(interval)
 
     def stop_heartbeat(self):
