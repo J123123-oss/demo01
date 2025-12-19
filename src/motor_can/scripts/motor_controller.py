@@ -150,7 +150,7 @@ class MotorController:
         derivative = error - self.pid_last_error
         correction = self.pid_kp * error + self.pid_ki * self.pid_integral + self.pid_kd * derivative
         self.pid_last_error = error
-        return -max(min(-correction, self.pid_correction_max), -self.pid_correction_max)
+        return max(min(-correction, self.pid_correction_max), -self.pid_correction_max)
 
     def execute_state(self):
         """执行当前状态对应的逻辑"""

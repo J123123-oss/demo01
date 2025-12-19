@@ -17,7 +17,7 @@ import serial
 
 # -------------------------- 驱动器核心配置 --------------------------
 BAUDRATE = 38400
-# SERIAL_PORT = "/dev/Motor-DBLS"  # 根据实际端口修改
+# SERIAL_PORT = "/dev/ttyv1"  # 根据实际端口修改
 SERIAL_PORT = "/dev/Motor-DBLS"  # 根据实际端口修改
 STOP_BITS = 1
 PARITY = "N"
@@ -73,13 +73,13 @@ class ServoDriveController:
         self.main_board = True
         self.imu_sensor = True
         self.motor_driver = True
-        self.motor_base = 1000
-        self.brush_base_speed = 1800
+        self.motor_base = 600
+        self.brush_base_speed = 1200
         self.brush_forward = rospy.get_param('~brush_forward', False)# 默认反转 True=正转，False=反转
         self.flag = 0
-        self.speed_pluse_max = 1500 * RATE
+        self.speed_pluse_max = 1000 * RATE
         self.reversed_start_time = None
-        self.REVERSE_TIME_THRESHOLD = 2.0
+        self.REVERSE_TIME_THRESHOLD = 1.0
         self.unloading_timer = 0.1
         self.unloading_start_time = None
         self.start_time = 0
@@ -99,12 +99,12 @@ class ServoDriveController:
 
         self.last_switch_time = 0
         self.SWITCH_DELAY = 5 # 触发延时阈值，单位：秒
-        self.PROXIMITY_ENABLE_DELAY = 5.0  # 接近开关使能延时（5秒）
-        self.startup_time = None
         self.state_change_protect_delay = 5.0
         self.last_state_change_time = 0.0  # 记录上次状态切换时间
         self.GLOBAL_REPEAT_DELAY = 3.5  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
+
+        self.is_outside_bin = True  # 默认仓外（BACKWARD）
 
         self.motor_control_state = {}  # 缓存格式：{motor_id: {"enable": bool, "direction": int, "brake": bool}}
         # 初始化所有电机的默认状态（根据实际场景调整）
@@ -115,7 +115,7 @@ class ServoDriveController:
         self.status_list = [
             "STOP", "FORWARD", "BACKWARD", "START", "LOADING", "UNLOADING",
             "UPSTOP", "LOWSTOP", "PISTON_OUT", "PISTON_IN", "CHARGE_OUT",
-            "RETURN_DOCK", "PAUSE"
+            "RETURN_DOCK"
         ]
 
         # 状态速度配置
@@ -126,7 +126,6 @@ class ServoDriveController:
             "FORWARD": {"velocity_up": self.motor_base * RATE, "velocity_low": -self.motor_base * RATE, "velocity_brush": -self.brush_base_speed},
             "BACKWARD": {"velocity_up": -self.motor_base * RATE, "velocity_low": self.motor_base * RATE, "velocity_brush": self.brush_base_speed},
             "LOADING": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": 0},
-            "PAUSE": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
             "UPSTOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
             "LOWSTOP": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
             "REVERSE": {"velocity_up": 0, "velocity_low": 0, "velocity_brush": -self.brush_base_speed},
@@ -169,7 +168,7 @@ class ServoDriveController:
         self.pid_kp = 80
         self.pid_ki = 0
         self.pid_kd = 0.5
-        self.pid_correction_max = 500
+        self.pid_correction_max = 200
         self.progress = 0
         self.battery_total_voltage = None
         self.battery_current = None
@@ -315,13 +314,9 @@ class ServoDriveController:
     def is_global_repeat_protected(self):
         """判断是否在5秒全局防重复触发保护期内"""
         current_time = time.time()
-        # 先判断启动3秒屏蔽期
-        # if current_time - self.startup_time < self.PROXIMITY_ENABLE_DELAY:
-        #     rospy.logdebug("系统启动未满3秒，屏蔽触发")
-        #     return True
-        # 再判断5秒全局防重复触发期
+        # 判断5秒全局防重复触发期
         if current_time - self.last_critical_switch_time < self.GLOBAL_REPEAT_DELAY:
-            # rospy.logwarn(f"3秒全局保护期内，距离上次触发还有{self.GLOBAL_REPEAT_DELAY - (current_time - self.last_critical_switch_time):.1f}秒")
+            rospy.logwarn(f"3秒全局保护期内，距离上次触发还有{self.GLOBAL_REPEAT_DELAY - (current_time - self.last_critical_switch_time):.1f}秒")
             return True
         return False
     
@@ -335,8 +330,7 @@ class ServoDriveController:
         current_state = self.motor_control_state.get(motor_id, {})
         if (current_state.get("enable") == enable and
             current_state.get("direction") == direction and
-            current_state.get("brake") == brake and
-            self.motor_driver == True):
+            current_state.get("brake") == brake):
             rospy.logdebug(f"ℹ️  电机{motor_id}控制模式无需修改：使能={enable}，方向={direction}，刹车={brake}")
             return True
         
@@ -375,14 +369,14 @@ class ServoDriveController:
         if success:
             self.set_control_mode(motor_id, enable=True, direction=direction)
             # rospy.loginfo(f"✅ 电机{motor_id}速度设置成功：{velocity} ")
-            current_direction = self.motor_control_state.get(motor_id, {}).get("direction", 0)
+        #     current_direction = self.motor_control_state.get(motor_id, {}).get("direction", 0)
         
-        # 4. 方向校验（原有逻辑保留）
-        if direction != current_direction:
-            mode_success = self.set_control_mode(motor_id, enable=True, direction=direction, brake=False)
-            if not mode_success:
-                rospy.logerr(f"❌ 电机{motor_id}方向修改失败")
-                return False
+        # # 4. 方向校验（原有逻辑保留）
+        # if direction != current_direction:
+        #     mode_success = self.set_control_mode(motor_id, enable=True, direction=direction, brake=False)
+        #     if not mode_success:
+        #         rospy.logerr(f"❌ 电机{motor_id}方向修改失败")
+        #         return False
         
         return success
 
@@ -394,7 +388,7 @@ class ServoDriveController:
         
         registers = self.rtu_read_register(motor_id, REG_ACTUAL_SPEED, count=1)
         if not registers or len(registers) != 1:
-            rospy.logwarn(f"⚠️ 读取电机{motor_id}转速失败")
+            rospy.logwarn(f" 读取电机{motor_id}转速失败")
             return 0
         
         speed_code_little = registers[0]
@@ -420,7 +414,7 @@ class ServoDriveController:
         
         registers = self.rtu_read_register(motor_id, REG_FAULT_STATUS, count=1)
         if not registers:
-            rospy.logwarn(f"⚠️ 读取电机{motor_id}故障码失败")
+            rospy.logwarn(f" 读取电机{motor_id}故障码失败")
             return None, "读取失败"
         
         fault_16 = registers[0]
@@ -429,13 +423,8 @@ class ServoDriveController:
         fault_desc = FAULT_MAP.get(fault_code, f"未知故障（0x{fault_code:02X}）")
         
         if fault_code != 0x00:
-            rospy.logwarn(f"⚠️ 电机{motor_id}故障：{fault_desc}")
+            rospy.logwarn(f" 电机{motor_id}故障：{fault_desc}")
             self.motor_driver = False
-            self.enable_drive(motor_id)
-            rospy.logwarn(f"⚠️ 电机{motor_id}重新使能！！")
-
-
-            # self.set_state("START")
         else:
             self.motor_driver = True
         
@@ -501,7 +490,7 @@ class ServoDriveController:
         """按键状态更新"""
         key_mapping = {
             's': "STOP", 'f': "FORWARD", 'b': "BACKWARD", 'a': "START",
-            'r': "REVERSE", 'l': "LOADING", 'p': "PAUSE", 'u': "UNLOADING",
+            'r': "REVERSE", 'l': "LOADING", 'u': "UNLOADING",
             '1': "UPSTOP", '2': "LOWSTOP"
         }
         if key in key_mapping:
@@ -511,12 +500,12 @@ class ServoDriveController:
                 self.auto_mode = True
             self.set_state(key_mapping[key])
         else:
-            rospy.loginfo(f"⚠️  无效按键: {key}")
+            rospy.loginfo(f"  无效按键: {key}")
 
     # -------------------------- 其他核心方法（保留并增加保护）--------------------------
     def set_state(self, new_state):
         if new_state not in self.status_config:
-            rospy.logwarn(f"⚠️ 尝试设置无效状态: {new_state}")
+            rospy.logwarn(f" 尝试设置无效状态: {new_state}")
             return False
         if new_state == self.current_status and new_state not in ["PISTON_OUT", "PISTON_IN", "STOP"]:
             return False
@@ -628,9 +617,9 @@ class ServoDriveController:
             elif command in self.status_list:
                 self.set_state(command)
             else:
-                rospy.logwarn(f"⚠️ 未找到command字段: {msg.data}")
+                rospy.logwarn(f" 未找到command字段: {msg.data}")
         except Exception as e:
-            rospy.logwarn(f"⚠️ 消息解析失败: {msg.data}, 错误: {e}")
+            rospy.logwarn(f" 消息解析失败: {msg.data}, 错误: {e}")
             if msg.data == "BRUSH_FORWARD":
                 self.brush_forward = not self.brush_forward
             self.set_state(msg.data)
@@ -674,6 +663,9 @@ class ServoDriveController:
 
     def proximity_callback(self, msg):
         """核心修改：统一自动/手动模式下的sensor_b/sensor_a处理逻辑"""
+        # 仓外：true触发|     a true UPSTOP / b true LOWSTOP     a b  true  LOADING 切换仓内
+
+        # 仓内：false触发|   已经切换FORWARD   a b  false 仓外
         # 1. 更新传感器状态
         if msg.sensor_b:
             self.sensors_status |= 0x01
@@ -685,44 +677,50 @@ class ServoDriveController:
             self.sensors_status &= ~0x02
         
         # 2. 传感器消抖（仅首次触发时处理）
-        sensor_b_trigger = msg.sensor_b and not self.sensor_triggered["a"]
-        sensor_a_trigger = msg.sensor_a and not self.sensor_triggered["b"]
-        sensor_aoth_trigger = msg.sensor_b and msg.sensor_a
+        sensor_a_trigger = msg.sensor_a and not self.sensor_triggered["a"]
+        sensor_b_trigger = msg.sensor_b and not self.sensor_triggered["b"]
+        sensor_both_trigger = msg.sensor_b and msg.sensor_a
 
-        # 3. RETURN_DOCK/CHARGE_OUT 特殊逻辑（保留原有）
-        if self.auto_mode and self.current_status == "RETURN_DOCK":
-            if self.elevator_stage == 2:
-                self.set_state("FORWARD")
+        # 3. 仓外→仓内 切换逻辑（双传感器触发=到位进仓）
+        if self.is_outside_bin and sensor_both_trigger:
+            self._switch_to_bin_in()  # 进入仓内
+            return  # 仓内逻辑优先，跳过仓外的运动判断
 
-        if self.auto_mode and self.current_status == "CHARGE_OUT":
-            if self.elevator_stage == 2:
-                if msg.sensor_b or msg.sensor_a:
-                    if self.current_status != "UNLOADING":
-                        self.set_state("UNLOADING")
-                        self.progress = 10
-                        self.unloading_start_time = time.time()
-                if self.current_status == "UNLOADING" and self.unloading_start_time:
-                    elapsed = time.time() - self.unloading_start_time
-                    if elapsed >= self.unloading_timer:
-                        self.set_state("STOP")
-                        self.progress = 0
-                        self.unloading_start_time = None
+        # 4. 仓内→仓外 切换逻辑（双传感器未触发+停留时间达标）
+        if not self.is_outside_bin and not sensor_both_trigger:
+            if not msg.sensor_a and not msg.sensor_b:
+                self._switch_to_bin_out()  # 退出仓外
+                return  # 仓外逻辑优先，跳过仓内的运动判断
+                
+        # 5. 仓外逻辑（非双触发=仓外，执行原有运动/中间态逻辑）
+        if self.is_outside_bin and self.current_status in ["FORWARD", "BACKWARD", "UPSTOP", "LOWSTOP"]:
+            self._handle_outside(msg, sensor_b_trigger, sensor_a_trigger)
+            # print("仓外逻辑sensor_b_trigger:",sensor_b_trigger)
+
+
+        # # 3. RETURN_DOCK/CHARGE_OUT 特殊
+        # if self.auto_mode and self.current_status == "RETURN_DOCK":
+        #     if self.elevator_stage == 2:
+        #         self.set_state("FORWARD")
+
+        # if self.auto_mode and self.current_status == "CHARGE_OUT":
+        #     if self.elevator_stage == 2:
+        #         if msg.sensor_b or msg.sensor_a:
+        #             if self.current_status != "UNLOADING":
+        #                 self.set_state("UNLOADING")
+        #                 self.progress = 10
+        #                 self.unloading_start_time = time.time()
+        #         if self.current_status == "UNLOADING" and self.unloading_start_time:
+        #             elapsed = time.time() - self.unloading_start_time
+        #             if elapsed >= self.unloading_timer:
+        #                 self.set_state("STOP")
+        #                 self.progress = 0
+        #                 self.unloading_start_time = None
 
         # 4. START状态逻辑（保留原有）
         if self.auto_mode and self.current_status == "START":
-            self.startup_time = time.time()
             if self.elevator_stage == 2:
-                # if msg.sensor_b or msg.sensor_a:
-                #     if self.current_status != "UNLOADING":
-                #         self.set_state("UNLOADING")
-                #         self.progress = 10
-                #         self.unloading_start_time = time.time()
-                # elif not msg.sensor_b and not msg.sensor_a:
-                #     self.set_state("BACKWARD")
-                #     self.progress = 20
-                # if self.current_status == "UNLOADING" and self.unloading_start_time:
-                #     elapsed = time.time() - self.unloading_start_time
-                #     if elapsed >= self.unloading_timer:
+                
                 self.set_state("BACKWARD")
                 self.progress = 20
                 # self.unloading_start_time = None
@@ -735,110 +733,175 @@ class ServoDriveController:
             return
 
         # 6. 统一处理自动/手动模式的FORWARD/BACKWARD状态
-        self._handle_motion_state(msg, sensor_b_trigger, sensor_a_trigger, sensor_aoth_trigger)
+        # self._handle_motion_state(msg, sensor_b_trigger, sensor_a_trigger, sensor_both_trigger)
 
         # 7. 处理UPSTOP/LOWSTOP状态（等待另一侧传感器触发后反向）
-        self._handle_stop_states(msg)
+        # self._handle_mid_states(msg)
+    def _switch_to_bin_in(self):
+        """仓外→仓内：双传感器触发，进入仓内停留"""
+        # if self.is_global_repeat_protected():
+        #     return
+        rospy.loginfo("双传感器触发→进入仓内（LOADING）")
+        self.is_outside_bin = False
+        self.set_state("LOADING")
+        self.progress = 100  # 到位进度
+        # 重置传感器标记
+        # self.sensor_triggered = {"a": False, "b": False}
+        if self.prev_motion_state == "BACKWARD":
+            self.set_state("FORWARD")
+        elif self.prev_motion_state == "FORWARD":
+            self.set_state("BACKWARD")
+        elif not self.prev_motion_state:
+            self.set_state("BACKWARD")# 启动默认仓外后退
+        self.progress = 20
+        self.brush_forward = not self.brush_forward  # 反向（原有逻辑保留）
+        self.last_switch_time = time.time()
+    
 
-    def _handle_motion_state(self, msg, sensor_b_trigger, sensor_a_trigger, sensor_aoth_trigger):
-        """处理FORWARD/BACKWARD状态的传感器逻辑（自动/手动统一）"""
+    def _switch_to_bin_out(self):
+        """仓内→仓外：双传感器未触发,切换回仓外（默认BACKWARD）"""
+        rospy.loginfo("切换仓外")
+        self.is_outside_bin = True
+        self.last_switch_time = time.time()
+
+
+        
+
+    def _handle_outside(self, msg, sensor_b_trigger, sensor_a_trigger):
+        """仓外逻辑：仅处理前进/后退/中间态，不涉及仓内"""
         with self.state_switch_lock:
-            # 先判断是否处于状态切换保护期，保护期内直接返回
-            if self.is_global_repeat_protected():
-                rospy.logdebug("状态切换保护期")
-                return
-            # 前进状态
-            if self.current_status == self.status_list[1]:  # FORWARD
-                # 双侧传感器触发：完成任务，反向
-                if sensor_aoth_trigger:
-                    self._complete_motion_and_reverse("FORWARD")
-                    self.last_critical_switch_time = time.time()
-                # 单侧传感器触发：进入对应停止状态
-                elif sensor_b_trigger and not msg.sensor_a:
-                    current_time = time.time()  # 获取当前时间戳
-                    # 核心：判断是否超过延时阈值
-                    if current_time - self.last_switch_time < self.SWITCH_DELAY:
-                        rospy.logwarn("UPSTOP反向切换触发间隔过短，忽略本次触发")
-                        return
+            # if self.is_global_repeat_protected():
+            #     return
+
+            # 仓外主态：FORWARD/BACKWARD
+            if self.current_status in ["FORWARD", "BACKWARD"]:
+                # 单侧触发→进入中间态（UPSTOP/LOWSTOP）
+                if sensor_b_trigger and msg.sensor_b:
+                    # if time.time() - self.last_switch_time < self.SWITCH_DELAY:
+                    #     rospy.logwarn("UPSTOP触发间隔过短，忽略")
+                    #     return
                     self.set_state("UPSTOP")
-                    self.sensor_triggered["a"] = True
-                    self.last_switch_time = time.time()
-                elif sensor_a_trigger and not msg.sensor_b:
-                    current_time = time.time()  # 获取当前时间戳
-                    # 核心：判断是否超过延时阈值
-                    if current_time - self.last_switch_time < self.SWITCH_DELAY:
-                        rospy.logwarn("LOWSTOP反向切换触发间隔过短，忽略本次触发")
-                        return
-                    self.set_state("LOWSTOP")
                     self.sensor_triggered["b"] = True
                     self.last_switch_time = time.time()
+                elif sensor_a_trigger and msg.sensor_a:
+                    # if time.time() - self.last_switch_time < self.SWITCH_DELAY:
+                    #     rospy.logwarn("LOWSTOP触发间隔过短，忽略")
+                    #     return
+                    self.set_state("LOWSTOP")
+                    self.sensor_triggered["a"] = True
+                    self.last_switch_time = time.time()
+            time.sleep(0.2)
+
+            # # 仓外中间态：UPSTOP/LOWSTOP（仅切换方向，不进仓内）
+            # elif self.current_status in ["UPSTOP", "LOWSTOP"]:
+            #     self._handle_mid_states(msg)
+
+
+
+
+
+
+
+
+    # def _handle_motion_state(self, msg, sensor_b_trigger, sensor_a_trigger, sensor_both_trigger):
+    #     """处理FORWARD/BACKWARD状态的传感器逻辑（自动/手动统一）"""
+    #     with self.state_switch_lock:
+    #         # 先判断是否处于状态切换保护期，保护期内直接返回
+    #         if self.is_global_repeat_protected():
+    #             rospy.logdebug("状态切换保护期")
+    #             return
+    #         # 前进状态
+    #         if self.current_status == self.status_list[1]:  # FORWARD
+    #             # 双侧传感器触发：完成任务，反向
+    #             if sensor_both_trigger:
+    #                 self._complete_motion_and_reverse("FORWARD")
+    #                 self.last_critical_switch_time = time.time()
+    #             # 单侧传感器触发：进入对应停止状态
+    #             elif sensor_b_trigger and not msg.sensor_a:
+    #                 current_time = time.time()  # 获取当前时间戳
+    #                 # 核心：判断是否超过延时阈值
+    #                 if current_time - self.last_switch_time < self.SWITCH_DELAY:
+    #                     rospy.logwarn("UPSTOP反向切换触发间隔过短，忽略本次触发")
+    #                     return
+    #                 self.set_state("UPSTOP")
+    #                 self.sensor_triggered["a"] = True
+    #                 self.last_switch_time = time.time()
+    #             elif sensor_a_trigger and not msg.sensor_b:
+    #                 current_time = time.time()  # 获取当前时间戳
+    #                 # 核心：判断是否超过延时阈值
+    #                 if current_time - self.last_switch_time < self.SWITCH_DELAY:
+    #                     rospy.logwarn("LOWSTOP反向切换触发间隔过短，忽略本次触发")
+    #                     return
+    #                 self.set_state("LOWSTOP")
+    #                 self.sensor_triggered["b"] = True
+    #                 self.last_switch_time = time.time()
                     
 
-            # 后退状态
-            elif self.current_status == self.status_list[2]:  # BACKWARD
-                # 双侧传感器触发：完成任务，反向
-                if sensor_aoth_trigger:
-                    self._complete_motion_and_reverse("BACKWARD")
-                    self.last_critical_switch_time = time.time()
-                # 单侧传感器触发：进入对应停止状态
-                elif sensor_b_trigger and not msg.sensor_a:
-                    self.set_state("UPSTOP")
-                    self.sensor_triggered["a"] = True
-                elif sensor_a_trigger and not msg.sensor_b:
-                    self.set_state("LOWSTOP")
-                    self.sensor_triggered["b"] = True
+    #         # 后退状态
+    #         elif self.current_status == self.status_list[2]:  # BACKWARD
+    #             # 双侧传感器触发：完成任务，反向
+    #             if sensor_both_trigger:
+    #                 self._complete_motion_and_reverse("BACKWARD")
+    #                 self.last_critical_switch_time = time.time()
+    #             # 单侧传感器触发：进入对应停止状态
+    #             elif sensor_b_trigger and not msg.sensor_a:
+    #                 self.set_state("UPSTOP")
+    #                 self.sensor_triggered["a"] = True
+    #             elif sensor_a_trigger and not msg.sensor_b:
+    #                 self.set_state("LOWSTOP")
+    #                 self.sensor_triggered["b"] = True
 
-    def _complete_motion_and_reverse(self, current_motion):
-        """完成运动并反向切换"""
-        current_time = time.time()  # 获取当前时间戳
-        if self.is_global_repeat_protected():
-            return
-        # 判断是否过启动屏蔽期（3秒内直接返回）
-        # if not self.is_proximity_sensor_enabled():
-        #     rospy.logdebug("系统启动未满3秒，屏蔽接近开关触发")
-        #     return
-        # 核心：判断是否超过延时阈值
-        if current_time - self.last_switch_time < self.SWITCH_DELAY:
-            rospy.logwarn("反向切换触发间隔过短，忽略本次触发")
-            return
-        rospy.loginfo(f"{current_motion}状态下双侧传感器触发，开始反向切换")
-        self.brush_forward = not self.brush_forward
-        # self.set_state("LOADING")
-        # time.sleep(1.0)
+    # def _complete_motion_and_reverse(self, current_motion):
+    #     """完成运动并反向切换"""
+    #     current_time = time.time()  # 获取当前时间戳
+    #     if self.is_global_repeat_protected():
+    #         return
+    #     # 判断是否过启动屏蔽期（3秒内直接返回）
+    #     # if not self.is_proximity_sensor_enabled():
+    #     #     rospy.logdebug("系统启动未满3秒，屏蔽接近开关触发")
+    #     #     return
+    #     # 核心：判断是否超过延时阈值
+    #     if current_time - self.last_switch_time < self.SWITCH_DELAY:
+    #         rospy.logwarn("反向切换触发间隔过短，忽略本次触发")
+    #         return
+    #     rospy.loginfo(f"{current_motion}状态下双侧传感器触发，开始反向切换")
+    #     self.brush_forward = not self.brush_forward
+    #     # self.set_state("LOADING")
+    #     # time.sleep(1.0)
         
-        # 清空状态
-        self.complete_state = True
-        self.initial_yaw = None
-        self.progress = 100
-        self.auto_step = None
-        self.elevator_stage = 0
+    #     # 清空状态
+    #     self.complete_state = True
+    #     self.initial_yaw = None
+    #     self.progress = 100
+    #     self.auto_step = None
+    #     self.elevator_stage = 0
         
-        # 反向切换
-        target_state = "BACKWARD" if current_motion == "FORWARD" else "FORWARD"
-        self.last_switch_time = current_time
-        self.set_state(target_state)
-        self.progress = 10
-        self.last_critical_switch_time = current_time
-        # 重置传感器触发标记
-        self.sensor_triggered = {"a": False, "b": False}
+    #     # 反向切换
+    #     target_state = "BACKWARD" if current_motion == "FORWARD" else "FORWARD"
+    #     self.last_switch_time = current_time
+    #     self.set_state(target_state)
+    #     self.progress = 10
+    #     self.last_critical_switch_time = current_time
+    #     # 重置传感器触发标记
+    #     self.sensor_triggered = {"a": False, "b": False}
 
-    def _handle_stop_states(self, msg):
+    def _handle_mid_states(self, msg):
         """处理UPSTOP/LOWSTOP状态：等待另一侧传感器触发后反向"""
         with self.state_switch_lock:
             # self.last_state_change_time = time.time()
             # LOWSTOP：等待sensor_b触发（另一侧）
             if self.current_status == self.status_list[7]:  # LOWSTOP
-                if msg.sensor_b and not self.sensor_triggered["a"]:
-                    self._switch_from_stop_state("LOWSTOP")
+                # if msg.sensor_b and not self.sensor_triggered["b"]:
+                self._switch_from_mid_state("LOWSTOP")
             
             # UPSTOP：等待sensor_a触发（另一侧）
             elif self.current_status == self.status_list[6]:  # UPSTOP
-                if msg.sensor_a and not self.sensor_triggered["b"]:
-                    self._switch_from_stop_state("UPSTOP")
+                # if msg.sensor_a and not self.sensor_triggered["a"]:
+                self._switch_from_mid_state("UPSTOP")
 
 
-    def _switch_from_stop_state(self, stop_state):
-        """从停止状态切换为反向运动"""
+    def _switch_from_mid_state(self, stop_state):
+        """从中间状态切换为反向运动"""
         if self.is_global_repeat_protected():
             return
         rospy.loginfo(f"在{stop_state}执行，对侧传感器触发，开始反向切换")
@@ -879,7 +942,7 @@ class ServoDriveController:
         """状态执行"""
         # 客户端未连接时不执行电机控制
         if self.rtu_client is None:
-            rospy.logwarn("⚠️ RTU客户端未连接，跳过电机控制")
+            rospy.logwarn(" RTU客户端未连接，跳过电机控制")
             return
 
         # START状态
@@ -904,7 +967,7 @@ class ServoDriveController:
                         motor_id = motor.get("id")
                         velocity = motor.get("velocity")
                         if None in (motor_id, velocity):
-                            rospy.logwarn(f"⚠️  跳过无效配置: {motor}")
+                            rospy.logwarn(f"  跳过无效配置: {motor}")
                             continue
                         try:
                             self.configure_motor(motor_id=motor_id, velocity=int(velocity * RATE))
@@ -935,15 +998,15 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
             # 角度偏差检测
-            angle_condition_met = (-7 < self.imu_yaw < -2 or 2 < self.imu_yaw < 7)
+            angle_condition_met = (-7 < self.imu_yaw < -2.0 or 2.0 < self.imu_yaw < 7)
             # angle_condition_met = None
             if angle_condition_met:
                 if self.reversed_start_time is None:
                     self.reversed_start_time = rospy.get_time()
-                    rospy.logwarn(f"⚠️  角度偏差: {self.imu_yaw:.2f}°")
+                    rospy.logwarn(f"  角度偏差: {self.imu_yaw:.2f}°")
                 elapsed = rospy.get_time() - self.reversed_start_time
                 if elapsed >= self.REVERSE_TIME_THRESHOLD:
-                    rospy.logwarn(f"⚠️  进入反转矫正")
+                    rospy.logwarn(f"  进入反转矫正")
                     self.set_state("REVERSE")
                     self.reversed_start_time = None
             else:
@@ -955,7 +1018,7 @@ class ServoDriveController:
             if not self.has_reverse_flag:
                 self.has_reverse_counter += 1
                 if self.has_reverse_counter > 100:
-                    rospy.logwarn("⚠️  连续反转100次，停止")
+                    rospy.logwarn("  连续反转100次，停止")
                     self.has_reverse_counter = 0
                     self.set_state("STOP")
                     self.motor_driver = False
@@ -1075,7 +1138,7 @@ class ServoDriveController:
         self.start_motor(motor_id)
         self.set_target_velocity(motor_id, velocity)
         self.enable_drive(motor_id)
-        self.start_heartbeat(motor_id)
+        # self.start_heartbeat(motor_id)
 
     def start_heartbeat(self, motor_id):
         """启动心跳"""
@@ -1112,8 +1175,8 @@ class ServoDriveController:
             self.heartbeat_thread.join(timeout=2)
         rospy.loginfo("❤️ 心跳停止")
 
-    def load_config(self, config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(self, config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(self, config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(self, config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         """加载配置"""
         try:
             with open(config_file, 'r') as file:
@@ -1187,7 +1250,7 @@ def main():
                 motor_id = motor.get("id")
                 velocity = motor.get("velocity")
                 if None in (motor_id, velocity):
-                    rospy.logwarn(f"⚠️  跳过无效配置: {motor}")
+                    rospy.logwarn(f"  跳过无效配置: {motor}")
                     continue
                 try:
                     controller.configure_motor(motor_id=motor_id, velocity=int(velocity * RATE))
