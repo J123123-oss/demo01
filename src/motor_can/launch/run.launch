@@ -1,10 +1,9 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
-<!-- <arg name="robot_ID" default="HANGZHOU-COMPANY" /> -->
+<arg name="robot_ID" default="HANGZHOU-COMPANY" />
 <!-- <arg name="robot_ID" default="HANGZHOU-FeiTeng-Motor" /> -->
-<arg name="robot_ID" default="GF-HZ-VMware" />
+<!-- <arg name="robot_ID" default="GF-HZ-VMware" /> -->
     <node pkg="motor_can" type="motor_DBLS.py" name="motor_DBLS" output="screen">
-    <!-- <node pkg="motor_can" type="main.py" name="main" output="screen"> -->
     <!-- <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen"> -->
 
     <!-- <node pkg="motor_can" type="motor_pyserial.py" name="motor_pyserial" output="screen"> -->
@@ -37,10 +36,11 @@
     <!-- <node pkg="serial_comms" type="battery_weather_station.py" name="battery_weather_station" output="screen"/> -->
     <!-- 接近开关使用CAN协议 -->
     <!-- <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" /> -->
+    <node pkg="serial_comms" type="proximity_gpio.py" name="proximity_gpio" />
     <!-- 接近开关使用Modbus RTU协议 -->
     <!-- <node pkg="serial_comms" type="proximity_sensor.py" name="proximity_sensor" /> -->
     <!-- 控制电缸节点 -->
-    <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" />
+    <!-- <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" /> -->
     <!-- 电池状态节点 -->
     <!-- <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" output="screen" /> -->
 

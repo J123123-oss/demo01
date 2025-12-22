@@ -99,11 +99,11 @@ class ServoDriveController:
 
         self.last_switch_time = 0
         self.SWITCH_DELAY = 5 # 触发延时阈值，单位：秒
-        self.PROXIMITY_ENABLE_DELAY = 5.0  # 接近开关使能延时（5秒）
+        self.PROXIMITY_ENABLE_DELAY = 4.0 # 接近开关使能延时（5秒）
         self.startup_time = None
         self.state_change_protect_delay = 5.0
         self.last_state_change_time = 0.0  # 记录上次状态切换时间
-        self.GLOBAL_REPEAT_DELAY = 3.5  # 3秒内不重复触发关键状态
+        self.GLOBAL_REPEAT_DELAY = 5.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
 
         self.motor_control_state = {}  # 缓存格式：{motor_id: {"enable": bool, "direction": int, "brake": bool}}
@@ -429,10 +429,24 @@ class ServoDriveController:
         fault_desc = FAULT_MAP.get(fault_code, f"未知故障（0x{fault_code:02X}）")
         
         if fault_code != 0x00:
-            rospy.logwarn(f"⚠️ 电机{motor_id}故障：{fault_desc}")
+            rospy.loginfo(f"⚠️ 电机{motor_id}故障：{fault_desc}")
             self.motor_driver = False
-            self.enable_drive(motor_id)
-            rospy.logwarn(f"⚠️ 电机{motor_id}重新使能！！")
+            # if motor_id == 2:#上电机
+            #     self.set_target_velocity(motor_id, self.last_left_speed)
+            # elif motor_id == 1:#下电机
+            #     self.set_target_velocity(motor_id, self.last_right_speed)
+            # self.enable_drive(motor_id)
+            # self.start_heartbeat(motor_id)
+            self.reversed_start_time = None  # 关键重置：避免残留旧计时
+            self.has_reverse_flag = False  # 顺带重置反向标记，确保状态干净
+            self.set_state("STOP")
+            rospy.loginfo(f"——————————————————立即停止,3秒后恢复————————————————")
+            time.sleep(3)
+            self.set_state("START")
+
+            # rospy.loginfo(f"⚠️ 电机{motor_id}重新使能！！")
+            # self.start_heartbeat(motor_id)
+            # self.enable_drive(motor_id)
 
 
             # self.set_state("START")
@@ -479,7 +493,7 @@ class ServoDriveController:
             return False
         
         fault_code, _ = self.read_fault_code(motor_id)
-        # if fault_code and fault_code != 0x00:
+        # if fault_code and fault_code != 0x00: 
         #     self.clear_fault(motor_id)
         
         success = self.set_control_mode(motor_id, enable=True)
@@ -723,7 +737,8 @@ class ServoDriveController:
                 # if self.current_status == "UNLOADING" and self.unloading_start_time:
                 #     elapsed = time.time() - self.unloading_start_time
                 #     if elapsed >= self.unloading_timer:
-                self.set_state("BACKWARD")
+                if self.auto_step is None:
+                    self.set_state("BACKWARD")
                 self.progress = 20
                 # self.unloading_start_time = None
 

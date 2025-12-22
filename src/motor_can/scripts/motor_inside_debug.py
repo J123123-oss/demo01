@@ -1175,8 +1175,8 @@ class ServoDriveController:
             self.heartbeat_thread.join(timeout=2)
         rospy.loginfo("❤️ 心跳停止")
 
-    # def load_config(self, config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    def load_config(self, config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(self, config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(self, config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         """加载配置"""
         try:
             with open(config_file, 'r') as file:
