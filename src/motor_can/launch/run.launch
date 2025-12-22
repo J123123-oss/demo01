@@ -4,6 +4,7 @@
 <arg name="robot_ID" default="GF-HZ-2P-Indoor" />
 <!-- <arg name="robot_ID" default="GF-HZ-VMware" /> -->
     <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
+    <!-- <node pkg="motor_can" type="main.py" name="main" output="screen"> -->
     <!-- <node pkg="motor_can" type="motor_pyserial.py" name="motor_pyserial" output="screen"> -->
         <!-- <param name="serial_port" value="/dev/CAN-pyserial" /> -->
         <!-- 波特率参数，根据转换器要求修改 -->
@@ -38,5 +39,8 @@
     <!-- <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" /> -->
     <!-- 电池状态节点 -->
     <!-- <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" output="screen" /> -->
+    <!-- 测试驱动：运行 motor_driver.py，自动初始化 CAN 总线并测试电机 2 的速度设置与读取；
+    测试控制模块：运行 motor_controller.py（需先启动 ROS 核心 roscore），通过键盘控制状态切换，验证业务逻辑；
+    启动完整系统：运行 rosrun motor_can main.py，加载配置并启动整个控制系统。 -->
 
 </launch>
