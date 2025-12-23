@@ -93,8 +93,8 @@ class ServoDriveController:
         self.last_velocity_brush = 0
         self.heartbeat_running = False
         self.heartbeat_thread = None
-        self.last_sensor_b = False
-        self.sensor_b_count = 0
+        self.last_sensor_a = False
+        self.sensor_a_count = 0
         self.last_sensor_time = 0
 
         self.last_switch_time = 0
@@ -103,8 +103,11 @@ class ServoDriveController:
         self.startup_time = None
         self.state_change_protect_delay = 5.0
         self.last_state_change_time = 0.0  # 记录上次状态切换时间
-        self.GLOBAL_REPEAT_DELAY = 5.0  # 3秒内不重复触发关键状态
+        self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
+        self.side_duration_time = None
+        self.TIMEOUT_THRESHOLD = 5.0  # 5秒超时
+        
 
         self.motor_control_state = {}  # 缓存格式：{motor_id: {"enable": bool, "direction": int, "brake": bool}}
         # 初始化所有电机的默认状态（根据实际场景调整）
@@ -566,9 +569,21 @@ class ServoDriveController:
             if self.prev_motion_state is None:
                 self.prev_motion_state = self.last_state
 
+            # If entering a side-stop state, start/reset the side-duration timer
+            if new_state in ["UPSTOP", "LOWSTOP"]:
+                self.side_duration_time = time.time()
+                self.last_stop_state = new_state
+            else:
+                # leaving stop states: clear any existing side timer/marker
+                if hasattr(self, 'side_duration_time') and self.side_duration_time is not None:
+                    self.side_duration_time = None
+                self.last_stop_state = None
+
         elif new_state == "PISTON_IN":
             self.initial_yaw = None
             self.auto_step = None
+            self.reversed_start_time = None  # 关键重置：避免残留旧计时
+            self.has_reverse_flag = False  # 顺带重置反向标记，确保状态干净
         elif new_state == "PISTON_OUT":
             if self.count % 2:
                 self.auto_mode = False
@@ -699,9 +714,15 @@ class ServoDriveController:
             self.sensors_status &= ~0x02
         
         # 2. 传感器消抖（仅首次触发时处理）
-        sensor_b_trigger = msg.sensor_b and not self.sensor_triggered["a"]
-        sensor_a_trigger = msg.sensor_a and not self.sensor_triggered["b"]
+        sensor_a_trigger = msg.sensor_a and not self.sensor_triggered["a"]
+        sensor_b_trigger = msg.sensor_b and not self.sensor_triggered["b"]
         sensor_aoth_trigger = msg.sensor_b and msg.sensor_a
+        # print(sensor_a_trigger, sensor_b_trigger, sensor_aoth_trigger)
+        # 传感器A计数
+        if not self.last_sensor_a and msg.sensor_a:
+            self.sensor_a_count += 1
+            rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
+        self.last_sensor_a = msg.sensor_a
 
         # 3. RETURN_DOCK/CHARGE_OUT 特殊逻辑（保留原有）
         if self.auto_mode and self.current_status == "RETURN_DOCK":
@@ -760,7 +781,7 @@ class ServoDriveController:
         with self.state_switch_lock:
             # 先判断是否处于状态切换保护期，保护期内直接返回
             if self.is_global_repeat_protected():
-                rospy.logdebug("状态切换保护期")
+                # rospy.loginfo("状态切换保护期")
                 return
             # 前进状态
             if self.current_status == self.status_list[1]:  # FORWARD
@@ -776,7 +797,7 @@ class ServoDriveController:
                         rospy.logwarn("UPSTOP反向切换触发间隔过短，忽略本次触发")
                         return
                     self.set_state("UPSTOP")
-                    self.sensor_triggered["a"] = True
+                    self.sensor_triggered["b"] = True
                     self.last_switch_time = time.time()
                 elif sensor_a_trigger and not msg.sensor_b:
                     current_time = time.time()  # 获取当前时间戳
@@ -785,7 +806,7 @@ class ServoDriveController:
                         rospy.logwarn("LOWSTOP反向切换触发间隔过短，忽略本次触发")
                         return
                     self.set_state("LOWSTOP")
-                    self.sensor_triggered["b"] = True
+                    self.sensor_triggered["a"] = True
                     self.last_switch_time = time.time()
                     
 
@@ -798,10 +819,10 @@ class ServoDriveController:
                 # 单侧传感器触发：进入对应停止状态
                 elif sensor_b_trigger and not msg.sensor_a:
                     self.set_state("UPSTOP")
-                    self.sensor_triggered["a"] = True
+                    self.sensor_triggered["b"] = True
                 elif sensor_a_trigger and not msg.sensor_b:
                     self.set_state("LOWSTOP")
-                    self.sensor_triggered["b"] = True
+                    self.sensor_triggered["a"] = True
 
     def _complete_motion_and_reverse(self, current_motion):
         """完成运动并反向切换"""
@@ -825,7 +846,7 @@ class ServoDriveController:
         self.complete_state = True
         self.initial_yaw = None
         self.progress = 100
-        self.auto_step = None
+        # self.auto_step = None
         self.elevator_stage = 0
         
         # 反向切换
@@ -840,15 +861,37 @@ class ServoDriveController:
     def _handle_stop_states(self, msg):
         """处理UPSTOP/LOWSTOP状态：等待另一侧传感器触发后反向"""
         with self.state_switch_lock:
-            # self.last_state_change_time = time.time()
-            # LOWSTOP：等待sensor_b触发（另一侧）
-            if self.current_status == self.status_list[7]:  # LOWSTOP
-                if msg.sensor_b and not self.sensor_triggered["a"]:
+            # Only process when actually in a side-stop state
+            if self.current_status not in ["UPSTOP", "LOWSTOP"]:
+                return
+
+            now = time.time()
+            # Initialize/reset timer when first entering or when switching between UP/LOW stop
+            if not hasattr(self, 'side_duration_time') or self.side_duration_time is None:
+                self.side_duration_time = now
+                self.last_stop_state = self.current_status
+            elif self.last_stop_state != self.current_status:
+                # switched between UPSTOP/LOWSTOP -> reset timer
+                self.side_duration_time = now
+                self.last_stop_state = self.current_status
+
+            elapsed = now - self.side_duration_time
+            # If exceeded configured threshold, force STOP to avoid hanging
+            if elapsed >= self.TIMEOUT_THRESHOLD:
+                rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s（> {self.TIMEOUT_THRESHOLD}s），强制切换到 STOP")
+                # reset flags and timers
+                self.side_duration_time = None
+                self.last_stop_state = None
+                self.sensor_triggered = {"a": False, "b": False}
+                self.set_state("STOP")
+                return
+
+            # Check for opposite-side sensor trigger to resume reverse
+            if self.current_status == "LOWSTOP":
+                if msg.sensor_b and not self.sensor_triggered.get("b", False):
                     self._switch_from_stop_state("LOWSTOP")
-            
-            # UPSTOP：等待sensor_a触发（另一侧）
-            elif self.current_status == self.status_list[6]:  # UPSTOP
-                if msg.sensor_a and not self.sensor_triggered["b"]:
+            elif self.current_status == "UPSTOP":
+                if msg.sensor_a and not self.sensor_triggered.get("a", False):
                     self._switch_from_stop_state("UPSTOP")
 
 
