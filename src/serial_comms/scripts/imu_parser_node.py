@@ -9,13 +9,16 @@ import numpy as np
 from std_msgs.msg import Header
 import std_srvs.srv
 import atexit
+# 新增导入（放在现有导入后）
+from serial_comms.srv import SetGyroCalib, SetGyroCalibResponse
+import time
 
 class IMUParser:
     def __init__(self):
         rospy.init_node('imu_parser_node')
         
         # 参数配置
-        self.port = rospy.get_param('~serial_port', '/dev/IMU')
+        self.port = rospy.get_param('~serial_port', '/dev/ttyACM0')
         self.baudrate = rospy.get_param('~baudrate', 9600)
         self.device_addr = 0x50  # 设备地址 (0x50 = 'P')
         
@@ -73,6 +76,16 @@ class IMUParser:
         self.query_state = 0  # 0:acc, 1:gyro, 2:rpy
         self.data_buffer = bytearray()  # 数据缓冲区
         self.query_interval = 0.1  # 指令发送间隔（100ms）
+        
+        # 陀螺仪自动校准指令配置
+        self.calib_cmds = {
+            'unlock': bytearray([0x50, 0x06, 0x00, 0x69, 0xB5, 0x88, 0x22, 0xA1]),  # 解锁指令
+            'disable': bytearray([0x50, 0x06, 0x00, 0x61, 0x00, 0x01, 0x14, 0x55]), # 关闭自动校准
+            'enable': bytearray([0x50, 0x06, 0x00, 0x61, 0x00, 0x00, 0xD5, 0x95]),  # 开启自动校准
+            'save': bytearray([0x50, 0x06, 0x00, 0x00, 0x00, 0x00, 0x84, 0x4B])     # 保存指令
+        }
+        # 校准服务
+        self.calib_srv = rospy.Service('~set_gyro_calib', SetGyroCalib, self.handle_gyro_calib)
 
         # 注册退出清理函数
         atexit.register(self.cleanup)
@@ -149,7 +162,7 @@ class IMUParser:
                 # 记录发送信息
                 self.last_sent_sensor = sensor_type
                 self.sent_cmd_timestamp[sensor_type] = rospy.Time.now().to_sec()
-                rospy.loginfo(f"发送{sensor_type}指令: {[hex(b) for b in cmd]}")
+                # rospy.loginfo(f"发送{sensor_type}指令: {[hex(b) for b in cmd]}")
                 return True
             self.init_serial()
             return False
@@ -272,7 +285,7 @@ class IMUParser:
                 'timestamp': rospy.Time.now().to_sec()
             }
             
-            rospy.loginfo(f"【加速度】X: {ax:.2f}, Y: {ay:.2f}, Z: {az:.2f} m/s² (原始: {ax_raw}, {ay_raw}, {az_raw})")
+            # rospy.loginfo(f"【加速度】X: {ax:.2f}, Y: {ay:.2f}, Z: {az:.2f} m/s² (原始: {ax_raw}, {ay_raw}, {az_raw})")
             return True
         except Exception as e:
             rospy.logerr(f"解析加速度失败: {str(e)}, 帧: {frame.hex()}")
@@ -310,7 +323,7 @@ class IMUParser:
                 'timestamp': rospy.Time.now().to_sec()
             }
             
-            rospy.loginfo(f"【角速度】X: {gx:.2f}, Y: {gy:.2f}, Z: {gz:.2f} rad/s (原始: {gx_raw}, {gy_raw}, {gz_raw})")
+            # rospy.loginfo(f"【角速度】X: {gx:.2f}, Y: {gy:.2f}, Z: {gz:.2f} rad/s (原始: {gx_raw}, {gy_raw}, {gz_raw})")
             return True
         except Exception as e:
             rospy.logerr(f"解析角速度失败: {str(e)}, 帧: {frame.hex()}")
@@ -348,7 +361,7 @@ class IMUParser:
                 'timestamp': rospy.Time.now().to_sec()
             }
             
-            rospy.loginfo(f"【姿态角】Roll: {roll:.2f}°, Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}° (原始: {roll_raw}, {pitch_raw}, {yaw_raw})")
+            # rospy.loginfo(f"【姿态角】Roll: {roll:.2f}°, Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}° (原始: {roll_raw}, {pitch_raw}, {yaw_raw})")
             
             # 发布完整IMU数据
             self.publish_imu_data()
@@ -428,7 +441,7 @@ class IMUParser:
                 data = self.ser.read(self.ser.in_waiting)
                 if data:
                     self.data_buffer += data
-                    rospy.loginfo(f"接收原始数据: {data.hex()} (缓冲区长度: {len(self.data_buffer)})")
+                    # rospy.loginfo(f"接收原始数据: {data.hex()} (缓冲区长度: {len(self.data_buffer)})")
 
             # 循环提取并处理完整帧
             while True:
@@ -457,6 +470,30 @@ class IMUParser:
         except Exception as e:
             # rospy.logerr(f"处理串口数据异常: {str(e)}")
             self.data_buffer.clear()
+    def send_gyro_calib_cmd(self, enable):
+        """发送陀螺仪自动校准指令序列"""
+        if not self.ser or not self.ser.is_open:
+            rospy.logerr("串口未连接，无法发送校准指令")
+            return False
+        
+        try:
+            # 1. 发送解锁指令
+            self.safe_serial_write(self.calib_cmds['unlock'], 'calib_unlock')
+            rospy.sleep(0.1)  # 延时100ms
+            
+            # 2. 发送开启/关闭校准指令
+            cmd_type = 'enable' if enable else 'disable'
+            self.safe_serial_write(self.calib_cmds[cmd_type], f'calib_{cmd_type}')
+            rospy.sleep(2.0)  # 延时2s
+            
+            # 3. 发送保存指令
+            self.safe_serial_write(self.calib_cmds['save'], 'calib_save')
+            
+            rospy.loginfo(f"陀螺仪自动校准{'开启' if enable else '关闭'}指令发送完成")
+            return True
+        except Exception as e:
+            rospy.logerr(f"发送校准指令失败: {str(e)}")
+            return False
 
     def start(self):
         """启动IMU轮询"""
@@ -517,6 +554,15 @@ class IMUParser:
         """服务回调：停止"""
         self.stop()
         return std_srvs.srv.TriggerResponse(success=True, message="IMU轮询已停止")
+    def handle_gyro_calib(self, req):
+        """服务回调：设置陀螺仪自动校准状态"""
+        # 执行校准指令发送
+        success = self.send_gyro_calib_cmd(req.enable)
+        if success:
+            msg = f"陀螺仪自动校准已{'开启' if req.enable else '关闭'}"
+        else:
+            msg = f"陀螺仪自动校准{'开启' if req.enable else '关闭'}失败"
+        return SetGyroCalibResponse(success=success, message=msg)
 
     def run(self):
         """主循环"""

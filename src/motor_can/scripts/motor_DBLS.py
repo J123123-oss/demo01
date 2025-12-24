@@ -106,7 +106,7 @@ class ServoDriveController:
         self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
         self.side_duration_time = None
-        self.TIMEOUT_THRESHOLD = 5.0  # 5秒超时
+        self.TIMEOUT_THRESHOLD = 7.0  # 5秒超时
         
 
         self.motor_control_state = {}  # 缓存格式：{motor_id: {"enable": bool, "direction": int, "brake": bool}}
@@ -878,12 +878,17 @@ class ServoDriveController:
             elapsed = now - self.side_duration_time
             # If exceeded configured threshold, force STOP to avoid hanging
             if elapsed >= self.TIMEOUT_THRESHOLD:
-                rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s（> {self.TIMEOUT_THRESHOLD}s），强制切换到 STOP")
+                rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s（> {self.TIMEOUT_THRESHOLD}s），强制切换")
                 # reset flags and timers
                 self.side_duration_time = None
                 self.last_stop_state = None
-                self.sensor_triggered = {"a": False, "b": False}
-                self.set_state("STOP")
+                # self.sensor_triggered = {"a": False, "b": False}
+                # self.set_state("STOP")
+                # time.sleep(3.0)
+                if self.current_status == "LOWSTOP":
+                    self._switch_from_stop_state("LOWSTOP")
+                elif self.current_status == "UPSTOP":
+                    self._switch_from_stop_state("UPSTOP")
                 return
 
             # Check for opposite-side sensor trigger to resume reverse

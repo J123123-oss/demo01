@@ -65,6 +65,8 @@ add_service_files(
   FILES
   RainfallReset.srv
   RainfallSetSensitivity.srv
+  SetGyroCalib.srv
+
 )
 
 ## Generate actions in the 'action' folder
