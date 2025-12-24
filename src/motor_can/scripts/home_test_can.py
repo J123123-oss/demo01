@@ -88,6 +88,7 @@ class ServoDriveController:
         self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
         self.side_duration_time = None
+        self.move_duration = None
         self.TIMEOUT_THRESHOLD = 7.0  # 5秒超时
 
         #设置状态列表
@@ -291,6 +292,7 @@ class ServoDriveController:
         # 自动模式记录当前状态，UPSTOP与LOWSTOP待确认
         # if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
         if self.auto_mode and new_state in ["FORWARD", "BACKWARD"]:
+            self.move_duration = time.time()
             self.auto_step = new_state
             # rospy.loginfo("auto_step:",self.auto_step)
         # 初始化为速度模式，添加恢复状态
@@ -866,6 +868,19 @@ class ServoDriveController:
         # 自动与手动模式下的检测
         if self.auto_mode: # 自动模式开启，完善：第一步START>BACKWARD>FORWARD>STOP 
             if self.current_status == self.status_list[1]:  # FORWARD
+                now = time.time()
+                if not hasattr(self, 'move_duration') or self.move_duration is None:
+                    self.move_duration = now
+
+                elapsed = now - self.move_duration
+                # If exceeded configured threshold, force STOP to avoid hanging
+                if elapsed >= 60:
+                    rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s, 急停！！！")
+                    # reset flags and timers
+                    self.set_state("STOP")
+                    self.move_duration = None
+                    elapsed = 0
+                    
                 if msg.sensor_a and msg.sensor_c:
                     #清空自动流程状态
                     threading.Timer(0.1, self.lock_motor).start()
@@ -888,6 +903,19 @@ class ServoDriveController:
                     self.set_state("UPSTOP")
 
             if self.current_status == self.status_list[2]:  # BACKWARD
+                now = time.time()
+                if not hasattr(self, 'move_duration') or self.move_duration is None:
+                    self.move_duration = now
+
+                elapsed = now - self.move_duration
+                # If exceeded configured threshold, force STOP to avoid hanging
+                if elapsed >= 60:
+                    rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s, 急停！！！")
+                    # reset flags and timers
+                    self.set_state("STOP")
+                    self.move_duration = None
+                    elapsed = 0
+                    
                 if (msg.sensor_b and msg.sensor_d):
                     #自动程序：第一步检测接近开关到位>后退>到边缘(可加入对正程序?)自动切换前进>直到进仓>发布完成消息>STOP停止使能。
                     self.initial_yaw = None  # 在对侧执行，重置初始偏航角
