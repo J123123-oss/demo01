@@ -106,7 +106,9 @@ class ServoDriveController:
         self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
         self.side_duration_time = None
+        self.move_duration = None
         self.TIMEOUT_THRESHOLD = 7.0  # 5秒超时
+        self.error_count = 0
         
 
         self.motor_control_state = {}  # 缓存格式：{motor_id: {"enable": bool, "direction": int, "brake": bool}}
@@ -379,6 +381,9 @@ class ServoDriveController:
             self.set_control_mode(motor_id, enable=True, direction=direction)
             # rospy.loginfo(f"✅ 电机{motor_id}速度设置成功：{velocity} ")
             current_direction = self.motor_control_state.get(motor_id, {}).get("direction", 0)
+        else:
+            rospy.loginfo(f"current_direction使用速度方向 ")
+            current_direction = 1 if velocity_little_endian < 0 else 0
         
         # 4. 方向校验（原有逻辑保留）
         if direction != current_direction:
@@ -432,7 +437,8 @@ class ServoDriveController:
         fault_desc = FAULT_MAP.get(fault_code, f"未知故障（0x{fault_code:02X}）")
         
         if fault_code != 0x00:
-            rospy.loginfo(f"⚠️ 电机{motor_id}故障：{fault_desc}")
+            self.error_count += 1
+            rospy.loginfo(f"⚠️ 电机{motor_id}故障：{fault_desc},次数{self.error_count}")
             self.motor_driver = False
             # if motor_id == 2:#上电机
             #     self.set_target_velocity(motor_id, self.last_left_speed)
@@ -541,6 +547,7 @@ class ServoDriveController:
             return False
 
         if self.auto_mode and new_state in ["FORWARD", "BACKWARD"]:
+            self.move_duration = time.time()
             self.auto_step = new_state
 
         if new_state in ["START", "CHARGE_OUT", "RETURN_DOCK"]:
@@ -719,10 +726,16 @@ class ServoDriveController:
         sensor_aoth_trigger = msg.sensor_b and msg.sensor_a
         # print(sensor_a_trigger, sensor_b_trigger, sensor_aoth_trigger)
         # 传感器A计数
+        current_time = time.time()  # 获取当前时间戳
         if not self.last_sensor_a and msg.sensor_a:
-            self.sensor_a_count += 1
-            rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
+            if (current_time - self.last_sensor_time) > 5.0:
+                self.sensor_a_count += 1
+                rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
+                self.last_sensor_time = current_time  # 触发成功后更新时间戳（核心修复）
+            # else:
+                # rospy.loginfo(f"传感器A触发但未计数（间隔不足5秒，剩余: {5.0 - (current_time - self.last_sensor_time):.1f}秒）")
         self.last_sensor_a = msg.sensor_a
+
 
         # 3. RETURN_DOCK/CHARGE_OUT 特殊逻辑（保留原有）
         if self.auto_mode and self.current_status == "RETURN_DOCK":
@@ -783,6 +796,19 @@ class ServoDriveController:
             if self.is_global_repeat_protected():
                 # rospy.loginfo("状态切换保护期")
                 return
+            now = time.time()
+            if not hasattr(self, 'move_duration') or self.move_duration is None:
+                self.move_duration = now
+
+            elapsed = now - self.move_duration
+            # If exceeded configured threshold, force STOP to avoid hanging
+            if elapsed >= 60:
+                rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s, 急停！！！")
+                # reset flags and timers
+                self.set_state("STOP")
+                self.move_duration = None
+                elapsed = 0
+
             # 前进状态
             if self.current_status == self.status_list[1]:  # FORWARD
                 # 双侧传感器触发：完成任务，反向
