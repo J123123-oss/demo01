@@ -583,6 +583,7 @@ class RobotController:
                 self.last_velocity_up = self.motor_driver.get_actual_velocity(3)
                 self.last_velocity_low = self.motor_driver.get_actual_velocity(2)
                 self.last_velocity_brush = self.motor_driver.get_actual_velocity(4)
+                self.battery_current = self.motor_driver.get_actual_current(4)
                 self.velocity_publish_count = 0
             # 构建状态消息
             state_msg = {
@@ -590,7 +591,7 @@ class RobotController:
                 # "battery": self.battery_remaining,
                 # "battery_temperatures": self.battery_temperatures,
                 # "battery_total_voltage": self.battery_total_voltage,
-                # "battery_current": self.battery_current,
+                "battery_current": self.battery_current,
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw else 0.00,
                 "velocity_up": round(self.last_velocity_up * 20/24, 2),

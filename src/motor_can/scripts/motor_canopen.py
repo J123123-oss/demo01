@@ -66,6 +66,17 @@ class ServoDriveController:
         self.sensor_a_count = 0
         self.last_sensor_time = 0
 
+        self.last_switch_time = 0
+        self.SWITCH_DELAY = 5 # 触发延时阈值，单位：秒
+        self.PROXIMITY_ENABLE_DELAY = 4.0 # 接近开关使能延时（5秒）
+        self.startup_time = None
+        self.state_change_protect_delay = 5.0
+        self.last_state_change_time = 0.0  # 记录上次状态切换时间
+        self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
+        self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
+        self.side_duration_time = None
+        self.TIMEOUT_THRESHOLD = 7.0  # 5秒超时
+        
         #设置状态列表
         self.status_list = [
             "STOP",  # 停止状态[默认状态]
@@ -306,11 +317,23 @@ class ServoDriveController:
         if new_state in ["REVERSE", "UPSTOP", "LOWSTOP"]:
             if self.prev_motion_state is None:
                 self.prev_motion_state = self.last_state
-        
-        elif new_state == "PISTON_IN":#清空自动模式重置初始偏航角
-            # self.auto_step = None
-            self.initial_yaw = None  # 重置初始偏航角与自动模式记录
+
+            # If entering a side-stop state, start/reset the side-duration timer
+            if new_state in ["UPSTOP", "LOWSTOP"]:
+                self.side_duration_time = time.time()
+                self.last_stop_state = new_state
+            else:
+                # leaving stop states: clear any existing side timer/marker
+                if hasattr(self, 'side_duration_time') and self.side_duration_time is not None:
+                    self.side_duration_time = None
+                self.last_stop_state = None
+
+        elif new_state == "PISTON_IN":
+            self.initial_yaw = None
             self.auto_step = None
+            self.reversed_start_time = None  # 关键重置：避免残留旧计时
+            self.has_reverse_flag = False  # 顺带重置反向标记，确保状态干净
+
         elif new_state == "PISTON_OUT": #切换手动与自动模式
             if( self.count % 2 ):
                 self.auto_mode = False
@@ -902,10 +925,30 @@ class ServoDriveController:
         
 
         #当单侧电机停止时，等待另一侧到位后切换状态
-        if self.current_status == self.status_list[7]: #LOWSTOP 
+        if self.current_status == self.status_list[7]: #LOWSTOP
+            now = time.time()
+            # Initialize/reset timer when first entering or when switching between UP/LOW stop
+            if not hasattr(self, 'side_duration_time') or self.side_duration_time is None:
+                self.side_duration_time = now
+                self.last_stop_state = self.current_status
+            elif self.last_stop_state != self.current_status:
+                # switched between UPSTOP/LOWSTOP -> reset timer
+                self.side_duration_time = now
+                self.last_stop_state = self.current_status
+
+            elapsed = now - self.side_duration_time
+            # If exceeded configured threshold, force STOP to avoid hanging
+            if elapsed >= self.TIMEOUT_THRESHOLD:
+                rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s（> {self.TIMEOUT_THRESHOLD}s），强制切换STOP")
+                # reset flags and timers
+                self.side_duration_time = None
+                self.last_stop_state = None
+                self.set_state("STOP")
+                return
+ 
                 #确保停到位
             if msg.sensor_c:
-                threading.Timer(0.1, self.lock_motor).start()
+                # threading.Timer(0.1, self.lock_motor).start()
                 self.set_state("PAUSE")
                 # time.sleep(1)
                 #清空自动流程状态
@@ -934,6 +977,25 @@ class ServoDriveController:
                 self.set_state("FORWARD")
                 self.progress = 60
         if self.current_status == self.status_list[6]: #UPSTOP 
+            now = time.time()
+            # Initialize/reset timer when first entering or when switching between UP/LOW stop
+            if not hasattr(self, 'side_duration_time') or self.side_duration_time is None:
+                self.side_duration_time = now
+                self.last_stop_state = self.current_status
+            elif self.last_stop_state != self.current_status:
+                # switched between UPSTOP/LOWSTOP -> reset timer
+                self.side_duration_time = now
+                self.last_stop_state = self.current_status
+
+            elapsed = now - self.side_duration_time
+            # If exceeded configured threshold, force STOP to avoid hanging
+            if elapsed >= self.TIMEOUT_THRESHOLD:
+                rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s（> {self.TIMEOUT_THRESHOLD}s），强制切换STOP")
+                # reset flags and timers
+                self.side_duration_time = None
+                self.last_stop_state = None
+                self.set_state("STOP")
+                return
                 #确保停到位
             if msg.sensor_a:
                 threading.Timer(0.1, self.lock_motor).start()
@@ -1452,20 +1514,21 @@ class ServoDriveController:
         :return: 实际电流 (‰额定电流)，读取失败返回None
         """
         # 发送读取对象字典命令 (索引6078h, 子索引00h)
-        self.send_command(motor_id, [0x40, 0x78, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        self.send_command(motor_id, [motor_id, 0x12, 0xa4, 0x00, 0x00, 0x00, 0x00, 0xff])
         
         # 等待回复
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 500ms超时
             msg = self.bus.recv(0.1)  # 100ms等待
-            if msg and msg.arbitration_id == (0x580 + motor_id):
-                # 检查是否正确返回
-                if len(msg.data) >= 6 and msg.data[0] == 0x4B and msg.data[1] == 0x78 and msg.data[2] == 0x60:
-                    # 16位返回值 (Int16)
-                    current = msg.data[4] | (msg.data[5] << 8)
+            if msg and msg.arbitration_id == (0x64 + motor_id):
+                # 检查是否为有效的606Ch响应
+
+                if len(msg.data) >= 8 and msg.data[0] == motor_id and msg.data[1] == 0x12 and msg.data[2] == 0xa4:
+                    # 解析32位速度值 (Int32)
+                    current = msg.data[3] | (msg.data[4] << 8) | (msg.data[5] << 16) | (msg.data[6] << 24)
                     # 处理有符号数
-                    if current > 0x7FFF:
-                        current -= 0x10000
+                    if current > 0x7FFFFFFF:
+                        current -= 0x10000000
                     rospy.logwarn(f"读取电机 {motor_id} 实际电流: {current/1000}额定电流")
                     return current
         rospy.logwarn(f"读取电机 {motor_id} 实际电流超时")
@@ -1473,21 +1536,22 @@ class ServoDriveController:
     def read_fault_code(self, motor_id):
         """读取电机故障码"""
         # 发送读取故障码指令
-        self.send_command(motor_id, [0x40, 0x3F, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        self.send_command(motor_id, [motor_id, 0x12, 0xaa, 0x00, 0x00, 0x00, 0x00, 0xff])
         # if self.get_actual_velocity(motor_id) != 0:
             # self.motor_driver = True
         # 接收回复
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 500ms超时
             msg = self.bus.recv(0.1)  # 100ms等待
-            if msg and msg.arbitration_id == (0x580 + motor_id):
-                # rospy.loginfo("fault_code_data:",msg.data)
-                # 验证 SDO 响应类型（0x43 表示读取成功）
-                if len(msg.data) >= 6 and msg.data[1] == 0x3F and msg.data[1] == 0x3F and msg.data[2] == 0x60:
-                    fault_code = msg.data[4] | (msg.data[5] << 8)
+            if msg and msg.arbitration_id == (0x64 + motor_id):
+                # 检查是否为有效的606Ch响应
+
+                if len(msg.data) >= 8 and msg.data[0] == motor_id and msg.data[1] == 0x12 and msg.data[2] == 0xaa:
+                    # 解析32位速度值 (Int32)
+                    fault_code = msg.data[3] | (msg.data[4] << 8) | (msg.data[5] << 16) | (msg.data[6] << 24)
                     # rospy.loginfo("msg.data:", msg.data)
                     if fault_code != 0:
-                        rospy.logwarn(f"电机 {motor_id} 故障码: 0x{fault_code:04X} ({fault_code})")
+                        rospy.loginfo(f"电机 {motor_id} 故障码: 0x{fault_code:04X} ({fault_code})")
                     else:
                         rospy.loginfo(f"电机 {motor_id} 无故障")
                         self.motor_driver = True
@@ -1500,11 +1564,9 @@ class ServoDriveController:
         rospy.loginfo(f"尝试清除电机 {motor_id} 故障...")
         
         # 步骤1: 发送故障复位激活命令 (bit7=1)
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x8F, 0x00, 0x00, 0x00])
+        self.send_command(motor_id, [motor_id, 0x81, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
         time.sleep(0.1)
         
-        # 步骤2: 发送故障复位完成命令 (bit7=0)
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
         rospy.loginfo(f"电机 {motor_id} 故障复位指令已发送")
         
         # 验证故障是否清除

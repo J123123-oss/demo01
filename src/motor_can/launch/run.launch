@@ -1,9 +1,9 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
 <!-- <arg name="robot_ID" default="GF-HZ-3F" /> -->
-<arg name="robot_ID" default="GF-HZ-2P-Indoor" />
+<arg name="robot_ID" default="ZHUJI-2P-Indoor" />
 <!-- <arg name="robot_ID" default="GF-HZ-VMware" /> -->
-    <node pkg="motor_can" type="motor_canopen.py" name="motor_can_node" output="screen">
+    <node pkg="motor_can" type="home_test_can.py" name="home_test_can" output="screen">
     <!-- <node pkg="motor_can" type="main.py" name="main" output="screen"> -->
     <!-- <node pkg="motor_can" type="motor_pyserial.py" name="motor_pyserial" output="screen"> -->
         <!-- <param name="serial_port" value="/dev/CAN-pyserial" /> -->

@@ -10,7 +10,7 @@ class CanMotorDriver:
         self.channel = channel
         self.interface = interface
         self.bus = self.create_can_bus()
-        self.motor_driver_status = True  # 驱动状态标记
+        self.motor_driver = True  # 驱动状态标记
         # 心跳线程控制
         self.heartbeat_running = False
         self.heartbeat_thread = None
@@ -101,6 +101,32 @@ class CanMotorDriver:
                     return velocity
         rospy.logwarn(f"⚠️ 读取电机{motor_id}速度超时")
         return 0
+    def get_actual_current(self, motor_id):
+        """
+        读取实际输出电流 (6078h)
+        :param motor_id: 电机ID
+        :return: 实际电流 (‰额定电流)，读取失败返回None
+        """
+        # 发送读取对象字典命令 (索引6078h, 子索引00h)
+        self.send_command(motor_id, [motor_id, 0x12, 0xa4, 0x00, 0x00, 0x00, 0x00, 0xff])
+        
+        # 等待回复
+        start_time = time.time()
+        while time.time() - start_time < 0.5:  # 500ms超时
+            msg = self.bus.recv(0.1)  # 100ms等待
+            if msg and msg.arbitration_id == (0x64 + motor_id):
+                # 检查是否为有效的606Ch响应
+
+                if len(msg.data) >= 8 and msg.data[0] == motor_id and msg.data[1] == 0x12 and msg.data[2] == 0xa4:
+                    # 解析32位速度值 (Int32)
+                    current = msg.data[3] | (msg.data[4] << 8) | (msg.data[5] << 16) | (msg.data[6] << 24)
+                    # 处理有符号数
+                    if current > 0x7FFFFFFF:
+                        current -= 0x10000000
+                    rospy.logwarn(f"读取电机 {motor_id} 实际电流: {current/1000}额定电流")
+                    return current
+        rospy.logwarn(f"读取电机 {motor_id} 实际电流超时")
+        return None
 
     def enable_drive(self, motor_id):
         """使能电机"""
@@ -159,35 +185,48 @@ class CanMotorDriver:
 
     # -------------------------- 故障处理 --------------------------
     def read_fault_code(self, motor_id):
-        """读取故障码"""
-        self.send_command(motor_id, [0x40, 0x3F, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00])
+        """读取电机故障码"""
+        # 发送读取故障码指令
+        self.send_command(motor_id, [motor_id, 0x12, 0xaa, 0x00, 0x00, 0x00, 0x00, 0xff])
+        # if self.get_actual_velocity(motor_id) != 0:
+            # self.motor_driver = True
+        # 接收回复
         start_time = time.time()
-        while time.time() - start_time < 0.5:
-            msg = self.bus.recv(0.1)
-            if msg and msg.arbitration_id == (0x580 + motor_id):
-                if len(msg.data) >= 6 and msg.data[1] == 0x3F and msg.data[2] == 0x60:
-                    fault_code = msg.data[4] | (msg.data[5] << 8)
+        while time.time() - start_time < 0.5:  # 500ms超时
+            msg = self.bus.recv(0.1)  # 100ms等待
+            if msg and msg.arbitration_id == (0x64 + motor_id):
+                # 检查是否为有效的606Ch响应
+
+                if len(msg.data) >= 8 and msg.data[0] == motor_id and msg.data[1] == 0x12 and msg.data[2] == 0xaa:
+                    # 解析32位速度值 (Int32)
+                    fault_code = msg.data[3] | (msg.data[4] << 8) | (msg.data[5] << 16) | (msg.data[6] << 24)
+                    # rospy.loginfo("msg.data:", msg.data)
                     if fault_code != 0:
-                        rospy.logwarn(f"⚠️ 电机{motor_id}故障码: 0x{fault_code:04X}")
-                        self.motor_driver_status = False
+                        rospy.loginfo(f"电机 {motor_id} 故障码: 0x{fault_code:04X} ({fault_code})")
+                        self.motor_driver = False
                     else:
-                        self.motor_driver_status = True
+                        rospy.loginfo(f"电机 {motor_id} 无故障")
+                        self.motor_driver = True
                     return fault_code
-        rospy.logwarn(f"⚠️ 读取电机{motor_id}故障码超时")
+        rospy.logwarn(f"读取电机 {motor_id} 故障码超时")
         return None
 
     def clear_fault(self, motor_id):
-        """清除故障"""
-        rospy.loginfo(f"🔧 清除电机{motor_id}故障...")
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x8F, 0x00, 0x00, 0x00])
+        """清除电机故障"""
+        rospy.loginfo(f"尝试清除电机 {motor_id} 故障...")
+        
+        # 步骤1: 发送故障复位激活命令 (bit7=1)
+        self.send_command(motor_id, [motor_id, 0x81, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
         time.sleep(0.1)
-        self.send_command(motor_id, [0x2B, 0x40, 0x60, 0x00, 0x0F, 0x00, 0x00, 0x00])
+        
+        rospy.loginfo(f"电机 {motor_id} 故障复位指令已发送")
+        
+        # 验证故障是否清除
         fault_code = self.read_fault_code(motor_id)
         if fault_code == 0 or fault_code is None:
-            rospy.loginfo(f"✅ 电机{motor_id}故障清除成功")
-            return True
-        rospy.logerr(f"❌ 故障清除失败，码: 0x{fault_code:04X}")
-        return False
+            rospy.loginfo(f"电机 {motor_id} 故障已清除")
+        else:
+            rospy.logerr(f"电机 {motor_id} 故障清除失败, 代码: 0x{fault_code:04X}")
 
     # -------------------------- 资源释放 --------------------------
     def shutdown(self):
