@@ -103,7 +103,7 @@ class ServoDriveController:
         self.startup_time = None
         self.state_change_protect_delay = 5.0
         self.last_state_change_time = 0.0  # 记录上次状态切换时间
-        self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
+        self.GLOBAL_REPEAT_DELAY = 5.0  # 5秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
         self.side_duration_time = None
         self.move_duration = None
