@@ -778,9 +778,14 @@ class ServoDriveController:
 
         # 5. REVERSE状态边界检测（保留原有）
         if self.current_status == "REVERSE":
-            if msg.sensor_b or msg.sensor_a:
-                rospy.logwarn("边界触发，立即STOP")
-                self.set_state("STOP")
+            if msg.sensor_b and msg.sensor_a:
+                self.set_state(self.prev_motion_state)
+                self.has_reverse_flag = False
+                self.reversed_start_time = None
+                rospy.loginfo("边界触发，切换到上个状态")
+            else:
+                rospy.loginfo("等待矫正中")
+                # self.set_state("STOP")
             return
 
         # 6. 统一处理自动/手动模式的FORWARD/BACKWARD状态
@@ -1055,10 +1060,10 @@ class ServoDriveController:
                 brush_speed = self.last_brush_speed
                 right_speed = max(min(right_speed, self.speed_pluse_max), -self.speed_pluse_max)
                 left_speed = max(min(left_speed, self.speed_pluse_max), -self.speed_pluse_max)
-                if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
-                    self.set_target_velocity(2, left_speed)
-                    self.set_target_velocity(1, right_speed)
-                    self.set_target_velocity(3, brush_speed)
+                # if (self.last_left_speed != left_speed or self.last_right_speed != right_speed or self.last_brush_speed != brush_speed):
+                self.set_target_velocity(2, left_speed)
+                self.set_target_velocity(1, right_speed)
+                self.set_target_velocity(3, brush_speed)
                 self.last_left_speed = left_speed
                 self.last_right_speed = right_speed
                 self.last_brush_speed = brush_speed
@@ -1180,9 +1185,9 @@ class ServoDriveController:
     def _cycle_heartbeat(self, motor_id, interval=1.5):
         """心跳循环"""
         while self.heartbeat_running and not rospy.is_shutdown():
-            if self.rtu_client is None:
-                time.sleep(interval)
+            if self.rtu_client is None or not self.rtu_client.is_socket_open():
                 self.reconnect_rtu_client()
+                time.sleep(interval)
                 continue
             self.read_fault_code(motor_id)
             time.sleep(interval)
