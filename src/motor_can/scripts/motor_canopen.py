@@ -19,7 +19,7 @@ import select
 rate = 24  # rpm*24速比
 
 class ServoDriveController:
-    # def __init__(self, channel='vcan0', interface='socketcan'):
+    # def __init__(self, channel='can0', interface='socketcan'):
     def __init__(self, channel='can0', interface='socketcan'):
         self.channel = channel
         self.interface = interface

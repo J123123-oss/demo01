@@ -21,7 +21,7 @@ import select
 rate = 24  # rpm*24速比
 
 class ServoDriveController:
-    # def __init__(self, channel='vcan0', interface='socketcan'):
+    # def __init__(self, channel='can0', interface='socketcan'):
     def __init__(self, channel='can0', interface='socketcan'):
         # try:
         #     wiringpi.wiringPiSetupGPIO()
@@ -83,7 +83,6 @@ class ServoDriveController:
         self.SWITCH_DELAY = 5 # 触发延时阈值，单位：秒
         self.PROXIMITY_ENABLE_DELAY = 4.0 # 接近开关使能延时（5秒）
         self.startup_time = None
-        self.state_change_protect_delay = 5.0
         self.last_state_change_time = 0.0  # 记录上次状态切换时间
         self.GLOBAL_REPEAT_DELAY = 3.0  # 3秒内不重复触发关键状态
         self.last_critical_switch_time = 0.0  # 记录上次关键状态切换时间
@@ -780,13 +779,15 @@ class ServoDriveController:
         # 条件1：传感器A从False变为True（上升沿触发）
         # 条件2：距离上次有效触发超过5秒
         if self.last_sensor_a == False and msg.sensor_a == True:
-            if (current_time - self.last_sensor_time) > 5.0:
-                self.sensor_a_count += 1
-                rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
-                self.last_sensor_time = current_time  # 触发成功后更新时间戳（核心修复）
-            else:
-                rospy.loginfo(f"传感器A触发但未计数（间隔不足5秒，剩余: {5.0 - (current_time - self.last_sensor_time):.1f}秒）")
-    
+            if (current_time - self.last_sensor_time) > 0.1:  # 防抖动时间0.1秒
+                if (current_time - self.last_sensor_time) > 5.0:
+                    self.sensor_a_count += 1
+                    rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
+                    self.last_sensor_time = current_time  # 触发成功后更新时间戳（核心修复）
+                # else:
+                    # rospy.loginfo(f"传感器A触发但未计数（间隔不足5秒，剩余: {5.0 - (current_time - self.last_sensor_time):.1f}秒）")
+        #记录触发次数
+        self.last_sensor_a = msg.sensor_a
         
         if self.auto_mode and self.current_status == "RETURN_DOCK": 
             #回仓
@@ -803,7 +804,8 @@ class ServoDriveController:
                         self.unloading_start_time = time.time()  # 记录开始时间
                         # rospy.loginfo("unloading_start_time:",self.unloading_start_time)
                 else:
-                    rospy.loginfo("充电状态，等待接近开关触发")
+                    rospy.loginfo("接近开关未触发，切换到STOP")
+                    self.set_state("STOP")
                 # 在UNLOADING状态，检查定时器
                 if self.current_status == "UNLOADING":
                     while hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
@@ -1072,8 +1074,7 @@ class ServoDriveController:
                 time.sleep(3)
                 self.set_state("FORWARD")
                 self.progress = 60
-        #记录触发次数
-        self.last_sensor_a = msg.sensor_a
+        
         
 
         # if self.current_status == self.status_list[4]:  # LOADING 未使用

@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import os
+import sys
+
+# ===================== 关键新增代码（必须放在所有导入之前） =====================
+# 1. 获取当前main.py文件的绝对路径（无论在哪里启动，都能精准获取）
+current_main_file = os.path.abspath(__file__)
+# 2. 获取main.py所在的目录（即 scripts/ 目录，也是motor_driver.py所在目录）
+scripts_dir = os.path.dirname(current_main_file)
+# 3. 将scripts/目录添加到Python查找路径的最前面（最高优先级，优先查找这里的模块）
+sys.path.insert(0, scripts_dir)
+
 import rospy
 import threading
+# 从motor_can包中导入模块（ROS环境会自动识别该路径，无需手动添加sys.path）
 from motor_driver import CanMotorDriver
 from motor_controller import RobotController
 
@@ -9,7 +21,7 @@ def main():
     try:
         # 初始化ROS节点
         rospy.init_node("motor_canopen_node")
-        rospy.loginfo("🚀 启动机器人控制系统...")
+        rospy.loginfo("————————启动电机控制————————")
         
         # 1. 初始化CAN电机驱动
         motor_driver = CanMotorDriver(channel='can0')
