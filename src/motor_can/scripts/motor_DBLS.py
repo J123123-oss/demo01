@@ -728,12 +728,13 @@ class ServoDriveController:
         # 传感器A计数
         current_time = time.time()  # 获取当前时间戳
         if not self.last_sensor_a and msg.sensor_a:
-            if (current_time - self.last_sensor_time) > 5.0:
-                self.sensor_a_count += 1
-                rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
-                self.last_sensor_time = current_time  # 触发成功后更新时间戳（核心修复）
-            # else:
-                # rospy.loginfo(f"传感器A触发但未计数（间隔不足5秒，剩余: {5.0 - (current_time - self.last_sensor_time):.1f}秒）")
+            if (current_time - self.last_sensor_time) > 0.1: #防抖过滤（解决毫秒/秒级瞬时抖动导致的重复边缘触发）
+                if (current_time - self.last_sensor_time) > 5.0:
+                    self.sensor_a_count += 1
+                    rospy.loginfo(f"传感器A触发次数: {self.sensor_a_count}")
+                    self.last_sensor_time = current_time  # 触发成功后更新时间戳（核心修复）
+                # else:
+                    # rospy.loginfo(f"传感器A触发但未计数（间隔不足5秒，剩余: {5.0 - (current_time - self.last_sensor_time):.1f}秒）")
         self.last_sensor_a = msg.sensor_a
 
 
@@ -779,12 +780,13 @@ class ServoDriveController:
         # 5. REVERSE状态边界检测（保留原有）
         if self.current_status == "REVERSE":
             if msg.sensor_b and msg.sensor_a:
+                self.initial_yaw = None
                 self.set_state(self.prev_motion_state)
                 self.has_reverse_flag = False
-                self.reversed_start_time = None
+                # self.reversed_start_time = None
                 rospy.loginfo("边界触发，切换到上个状态")
-            else:
-                rospy.loginfo("等待矫正中")
+            # else:
+                # rospy.loginfo("等待矫正中")
                 # self.set_state("STOP")
             return
 
@@ -808,6 +810,8 @@ class ServoDriveController:
             elapsed = now - self.move_duration
             # If exceeded configured threshold, force STOP to avoid hanging
             if elapsed >= 60:
+                if self.current_status == "STOP":
+                    return
                 rospy.logwarn(f"⚠️ {self.current_status} 状态持续{elapsed:.1f}s, 急停！！！")
                 # reset flags and timers
                 self.set_state("STOP")
