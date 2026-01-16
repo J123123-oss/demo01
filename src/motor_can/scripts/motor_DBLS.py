@@ -703,7 +703,6 @@ class ServoDriveController:
         if not registers or len(registers) != 1:
             rospy.logwarn(f"⚠️ 读取电机{motor_id}转速失败")
             return 0
-        
         speed_cmd = registers[0]
         # 补码还原为原始转速：若指令值>0x8000（32768），则为负数（0x10000 - 指令值）
         if speed_cmd > 0x8000:
