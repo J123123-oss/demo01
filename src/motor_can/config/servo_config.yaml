@@ -2,12 +2,20 @@ motors:
   - motor_id: 1        # 右电机ID
     rtu_addr: 1        # RTU站点地址
     pole_pairs: 5      # 极对数
-    velocity: 1        # 基础速度
+    velocity: 0        # 基础速度
   - motor_id: 2        # 左电机ID   远离主控
     rtu_addr: 2        # RTU站点地址
     pole_pairs: 5      # 极对数
-    velocity: 1        # 基础速度
+    velocity: 0        # 基础速度
   - motor_id: 3        # 刷电机ID
     rtu_addr: 3        # RTU站点地址
     pole_pairs: 5      # 极对数
-    velocity: 4        # 基础速度
+    velocity: 0        # 基础速度
+  - motor_id: 4        # 电机ID
+    rtu_addr: 3        # RTU站点地址
+    pole_pairs: 5      # 极对数
+    velocity: 0        # 基础速度
+  - motor_id: 5        # 电机ID
+    rtu_addr: 3        # RTU站点地址
+    pole_pairs: 5      # 极对数
+    velocity: 0        # 基础速度

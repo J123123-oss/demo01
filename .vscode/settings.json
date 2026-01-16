@@ -7,5 +7,6 @@
     ],
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "python-envs.pythonProjects": [],
-    "cmake.sourceDirectory": "/home/orangepi/demo01/src/motor_can"
+    "cmake.sourceDirectory": "/home/orangepi/demo01/src/motor_can",
+    "ROS2.distro": "noetic"
 }
