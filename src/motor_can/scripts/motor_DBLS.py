@@ -377,10 +377,11 @@ class ServoDriveController:
         
         # 速度限幅（手册[-5000,5000]，实际限制3000）
         target_speed = max(min(target_speed, MOTOR_MAX_SPEED), -MOTOR_MAX_SPEED)
-        
+        if target_speed < 0:
+            target_speed = 0x10000 - abs(target_speed)
         try:
             # 1. 写入速度指令（方向通过速度正负实现）
-            self.rtu_write_register(motor_id, REG_SPEED_CMD, int(abs(target_speed)))
+            self.rtu_write_register(motor_id, REG_SPEED_CMD, target_speed)
             
             # 2. 启动电机（0x2001=1）
             self.rtu_write_register(motor_id, REG_RUN_CMD, 1)
@@ -388,7 +389,9 @@ class ServoDriveController:
             # 3. 更新缓存
             self.motor_running[motor_id] = True
             self.motor_current_speed[motor_id] = target_speed
-            rospy.loginfo(f"✅ 电机{motor_id}启动：速度{target_speed} RPM，方向{'正转' if target_speed>0 else '反转'}")
+            rospy.loginfo(f"✅ 电机{motor_id}启动：速度{target_speed} RPM（写入指令：0x{target_speed:04X}），{'正转' if target_speed>0 else '反转'}")
+
+            # rospy.loginfo(f"✅ 电机{motor_id}启动：速度{target_speed} RPM，方向{'正转' if target_speed>0 else '反转'}")
             return True
         except Exception as e:
             rospy.logerr(f"❌ 电机{motor_id}启动失败：{e}")
@@ -422,10 +425,14 @@ class ServoDriveController:
             return self.motor_start(motor_id, new_speed)
         
         new_speed = max(min(new_speed, MOTOR_MAX_SPEED), -MOTOR_MAX_SPEED)
+        if new_speed < 0:
+            new_speed = 0x10000 - abs(new_speed)
         try:
-            self.rtu_write_register(motor_id, REG_SPEED_CMD, int(abs(new_speed)))
+            self.rtu_write_register(motor_id, REG_SPEED_CMD, new_speed)
             self.motor_current_speed[motor_id] = new_speed
-            rospy.logdebug(f"⚡ 电机{motor_id}速度更新为：{new_speed} RPM")
+            rospy.logdebug(f"⚡ 电机{motor_id}速度更新为：{new_speed} RPM（写入指令：0x{new_speed:04X}）")
+
+            # rospy.logdebug(f"⚡ 电机{motor_id}速度更新为：{new_speed} RPM")
             return True
         except Exception as e:
             rospy.logerr(f"❌ 电机{motor_id}速度调节失败：{e}")
@@ -692,15 +699,19 @@ class ServoDriveController:
             rospy.logerr("❌ RTU客户端未连接，无法读取转速")
             return 0
         
-        registers = self.rtu_read_register(motor_id, REG_SPEED_CMD, count=1)  # 读取速度指令寄存器作为实际转速参考
+        registers = self.rtu_read_register(motor_id, REG_SPEED_CMD, count=1)
         if not registers or len(registers) != 1:
             rospy.logwarn(f"⚠️ 读取电机{motor_id}转速失败")
             return 0
         
-        speed_val = registers[0]
-        # 方向还原（速度指令为绝对值，通过缓存的方向补充）
-        actual_speed = speed_val if self.motor_current_speed[motor_id] >= 0 else -speed_val
-        rospy.logdebug(f"电机{motor_id}实际转速：{actual_speed} RPM")
+        speed_cmd = registers[0]
+        # 补码还原为原始转速：若指令值>0x8000（32768），则为负数（0x10000 - 指令值）
+        if speed_cmd > 0x8000:
+            actual_speed = -(0x10000 - speed_cmd)
+        else:
+            actual_speed = speed_cmd
+        
+        rospy.logdebug(f"电机{motor_id}实际转速：{actual_speed} RPM（读取指令：0x{speed_cmd:04X}）")
         return round(actual_speed, 2)
 
     def status_callback(self, msg):
