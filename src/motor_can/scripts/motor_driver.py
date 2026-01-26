@@ -165,7 +165,7 @@ class CanMotorDriver:
         if self.bus is None:
             rospy.logerr("❌ CAN未就绪，无法启动心跳")
             return
-        self.stop_heartbeat()  # 防止重复启动
+        # self.stop_heartbeat()  # 防止重复启动
         self._send_heartbeat_0x10(motor_id)
         self.heartbeat_running = True
         self.heartbeat_thread = threading.Thread(

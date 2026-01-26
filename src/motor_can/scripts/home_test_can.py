@@ -46,12 +46,12 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 20   #下发电机理想转速rpm
-        self.base_speed = 20   #设置后退基础速度值  * 0.8 > * 1
-        self.brush_base_speed = 80 * 20 # 未加减速器的rpm
+        self.motor_base = 5   #下发电机理想转速rpm
+        self.base_speed = 5   #设置后退基础速度值  * 0.8 > * 1
+        self.brush_base_speed = 5 * 20 # 未加减速器的rpm
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 40*rate  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 5*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -378,9 +378,9 @@ class ServoDriveController:
             # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
             if self.velocity_publish_count >= self.velocity_publish_interval:
                 # 获取新的速度数据
-                self.last_velocity_up = self.get_actual_velocity(3)
-                self.last_velocity_low = self.get_actual_velocity(2)
-                self.last_velocity_brush = self.get_actual_velocity(4)
+                # self.last_velocity_up = self.get_actual_velocity(3)
+                # self.last_velocity_low = self.get_actual_velocity(2)
+                # self.last_velocity_brush = self.get_actual_velocity(4)
                 self.velocity_publish_count = 0  # 重置计数器
             
             # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
@@ -396,9 +396,9 @@ class ServoDriveController:
                 "battery_current": self.battery_current, # 电池电流
                 "progress": self.progress,
                 "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                "velocity_up": round(velocity_up, 2),  # 保留两位小数，数值类型
-                "velocity_low": round(velocity_low, 2),
-                "velocity_brush": round(velocity_brush, 2), # 20减速器，不用转换
+                # "velocity_up": round(velocity_up, 2),  # 保留两位小数，数值类型
+                # "velocity_low": round(velocity_low, 2),
+                # "velocity_brush": round(velocity_brush, 2), # 20减速器，不用转换
                 "sensors_status": self.sensors_status,  # 超声波传感器状态
                 "device_status": {
                 "main_board": self.main_board,
@@ -1594,7 +1594,7 @@ class ServoDriveController:
         # 发送读取故障码指令
         self.send_command(motor_id, [motor_id, 0x12, 0xaa, 0x00, 0x00, 0x00, 0x00, 0xff])
         # if self.get_actual_velocity(motor_id) != 0:
-            # self.motor_driver = True
+        #     self.motor_driver = True
         # 接收回复
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 500ms超时
@@ -1665,7 +1665,7 @@ class ServoDriveController:
             # 读取当前转矩
             actual_torque = self.get_actual_torque(motor_id)
             # if self.get_actual_velocity(motor_id) == 0:
-            #     self.motor_driver = False
+            #     self.motor_driver = Falsea
             # else:
             #     self.motor_driver = True
             # 获取配置的最大转矩

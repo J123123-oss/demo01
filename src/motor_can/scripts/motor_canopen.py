@@ -33,12 +33,12 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 30   #下发电机理想转速rpm
-        self.base_speed = 30   #设置后退基础速度值  * 0.8 > * 1
-        self.brush_base_speed = 150 * 20 # 未加减速器的rpm
+        self.motor_base = 3   #下发电机理想转速rpm
+        self.base_speed = 3   #设置后退基础速度值  * 0.8 > * 1
+        self.brush_base_speed = 15 * 20 # 未加减速器的rpm
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
 
-        self.speed_pluse_max = 60*rate  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 6*rate  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -215,7 +215,7 @@ class ServoDriveController:
         self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒1次
         self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
-        # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
+        self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
         # PID参数
         # self.pid_kp = 100.0
         # self.pid_ki = 0.1  # 如果需要加速响应，也可以适当调整积分增益
@@ -294,18 +294,18 @@ class ServoDriveController:
                 self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
                     # 1. 防止重复启动线程（若已运行则先停止）
                 self.stop_heartbeat()
-            # if self.fault_check_timer is not None:    
-                # self.fault_check_timer.shutdown()
-                # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
+            if self.fault_check_timer is not None:    
+                self.fault_check_timer.shutdown()
+                self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
             threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
                 self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
-            # if self.fault_check_timer is not None:    
-                # self.fault_check_timer.shutdown()
-                # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
+            if self.fault_check_timer is not None:    
+                self.fault_check_timer.shutdown()
+                self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
         # 进入运动状态时，只有当前不是REVERSE状态才更新prev_motion_state
         # if new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
@@ -361,9 +361,9 @@ class ServoDriveController:
             # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
             if self.velocity_publish_count >= self.velocity_publish_interval:
                 # 获取新的速度数据
-                self.last_velocity_up = self.get_actual_velocity(3)
-                self.last_velocity_low = self.get_actual_velocity(2)
-                self.last_velocity_brush = self.get_actual_velocity(4)
+                # self.last_velocity_up = self.get_actual_velocity(3)
+                # self.last_velocity_low = self.get_actual_velocity(2)
+                # self.last_velocity_brush = self.get_actual_velocity(4)
                 self.velocity_publish_count = 0  # 重置计数器
             
             # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
@@ -1422,9 +1422,9 @@ class ServoDriveController:
                 self.last_brush_speed = brush_speed
 
         # 实时发布状态
-        # self.current_velocity_up = self.get_actual_velocity(3)
-        # self.current_velocity_low = self.get_actual_velocity(2)
-        # self.current_velocity_brush = self.get_actual_velocity(4)
+        self.current_velocity_up = self.get_actual_velocity(3)
+        self.current_velocity_low = self.get_actual_velocity(2)
+        self.current_velocity_brush = self.get_actual_velocity(4)
     
     def delayed_publish_freq_switch(self, delay_sec=3):
         # 延时后切换到低频率
@@ -1433,9 +1433,9 @@ class ServoDriveController:
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
             self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
-            # if self.fault_check_timer is not None:
-                # self.fault_check_timer.shutdown()
-            # self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
+            if self.fault_check_timer is not None:
+                self.fault_check_timer.shutdown()
+            self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
     def get_max_torque(self, motor_id):
         """
         读取配置的最大转矩 (6072h)
@@ -1537,8 +1537,8 @@ class ServoDriveController:
         """读取电机故障码"""
         # 发送读取故障码指令
         self.send_command(motor_id, [motor_id, 0x12, 0xaa, 0x00, 0x00, 0x00, 0x00, 0xff])
-        # if self.get_actual_velocity(motor_id) != 0:
-            # self.motor_driver = True
+        if self.get_actual_velocity(motor_id) != 0:
+            self.motor_driver = True
         # 接收回复
         start_time = time.time()
         while time.time() - start_time < 0.5:  # 500ms超时
