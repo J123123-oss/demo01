@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import rospy
 from std_msgs.msg import Time
 from serial_comms.msg import Environment  # 替换为你的功能包名
@@ -15,7 +16,7 @@ class WeatherStationNode:
         # Modbus RTU配置（重点：波特率设为4800）
         self.client = ModbusSerialClient(
             method='rtu',
-            port='/dev/battery-weather',  # 串口设备，根据实际情况修改
+            port='/dev/jog-weather',  # 串口设备，根据实际情况修改
             baudrate=9600,        # 波特率：4800（按需求设置）
             parity='N',           # 校验位：无校验
             stopbits=1,           # 停止位：1
@@ -29,7 +30,7 @@ class WeatherStationNode:
         self.REG_LUX_HIGH = 510     # 光照高16位
         self.REG_LUX_LOW = 511      # 光照低16位
         self.REG_RAINFALL = 513     # 雨量（实际值的10倍）
-        self.SLAVE_ID = 1           # 设备地址
+        self.SLAVE_ID = 2           # 设备地址
         
         # 连接设备
         if not self.client.connect():

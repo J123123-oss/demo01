@@ -1,50 +1,19 @@
 <launch>
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
-<arg name="robot_ID" default="HANGZHOU-COMPANY" />
-<!-- <arg name="robot_ID" default="GF-HZ-3F" /> -->
-<!-- <arg name="robot_ID" default="ZHUJI-2P-Indoor" /> -->
-<!-- <arg name="robot_ID" default="GF-HZ-VMware" /> -->
-    <!-- <node pkg="motor_can" type="home_test_can.py" name="home_test_can" output="screen"> -->
-    <node pkg="motor_can" type="main.py" name="main" output="screen">
-    <!-- <node pkg="motor_can" type="main.py" name="main" output="screen"> -->
-    <!-- <node pkg="motor_can" type="motor_pyserial.py" name="motor_pyserial" output="screen"> -->
-        <!-- <param name="serial_port" value="/dev/CAN-pyserial" /> -->
-        <!-- 波特率参数，根据转换器要求修改 -->
-        <!-- <param name="baudrate" value="2000000" /> -->
-    </node>
-    <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" >
+<arg name="robot_ID" default="HEJIN_Huaxinyuan" />
+    <node pkg="motor_can" type="home_test_can.py" name="home_test_can" output="screen"/>
+    <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" output="screen">
         <param name="~broker" value="121.40.57.48"/>
         <param name="~port" value="1883"/>
         <param name="~user" value="gf-mounted"/>
         <param name="~password" value="20230810"/>
         <param name="~topic_status" value="robot/$(arg robot_ID)/status"/>
-        <param name="~topic_cmd" value="robot/$(arg robot_ID)/cmd"/>
+        <param name="~topic_cmd" value="robot/$(arg robot_ID)/status"/>
         <param name="~client_id" value="python-mqtt-client-$(arg robot_ID)"/>
         <param name="~topic_command" value="robot/$(arg robot_ID)/command"/>
         <param name="~topic_result" value="robot/$(arg robot_ID)/result"/>
 
     </node>
-    <!-- <node pkg="serial_comms" type="battery_imu_node.py" name="battery_imu_node"  /> -->
-    <!-- <node pkg="serial_comms" type="relay_battery.py" name="relay_battery" output="screen" > -->
-    <!-- 高温阈值  |    低温阈值  |    检查间隔 -->
-        <!-- <param name="~temperature_threshold_high" value="5.0"/> -->
-        <!-- <param name="~temperature_threshold_low" value="3.0"/> -->
-        <!-- <param name="~battery_check_interval" value="10"/> -->
-        <!-- <param name="~relay_check_interval" value="11"/> -->
-    <!-- </node> -->
-    <!-- IMU单独节点 -->
-    <node pkg="serial_comms" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
-    <!-- <node pkg="serial_comms" type="battery_weather_station.py" name="battery_weather_station" output="screen"/> -->
-    <!-- 接近开关使用CAN协议 -->
-    <!-- <node pkg="serial_comms" type="proximity_can.py" name="proximity_can" /> -->
-    <!-- 接近开关使用GPIO控制 -->
-    <node pkg="serial_comms" type="proximity_gpio.py" name="proximity_gpio" />
-    <!-- 控制电缸节点 -->
-    <!-- <node pkg="serial_comms" type="motor_gpio.py" name="motor_gpio" /> -->
-    <!-- 电池状态节点 -->
-    <!-- <node pkg="serial_comms" type="battery_monitor.py" name="battery_monitor" output="screen" /> -->
-    <!-- 测试驱动：运行 motor_driver.py，自动初始化 CAN 总线并测试电机 2 的速度设置与读取；
-    测试控制模块：运行 motor_controller.py（需先启动 ROS 核心 roscore），通过键盘控制状态切换，验证业务逻辑；
-    启动完整系统：运行 rosrun motor_can main.py，加载配置并启动整个控制系统。 -->
+    <node pkg="serial_comms" type="jog_weather_station.py" name="jog_weather_station" output="screen"/>
 
 </launch>

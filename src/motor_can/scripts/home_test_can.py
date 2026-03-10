@@ -5,7 +5,8 @@ import time
 import rospy
 import json
 import yaml
-from std_msgs.msg import String, Int8, Float32, Float32MultiArray,Bool
+from std_msgs.msg import String, Int8, Float32, Float32MultiArray,Bool, UInt8
+import subprocess
 from serial_comms.msg import Distances
 from serial_comms.msg import Sensors
 from serial_comms.msg import INSPVAE  # 确保导入正确的消息类型
@@ -21,8 +22,8 @@ import select
 rate = 24  # rpm*24速比
 
 class ServoDriveController:
+    def __init__(self, channel='vcan0', interface='socketcan'):
     # def __init__(self, channel='can0', interface='socketcan'):
-    def __init__(self, channel='can0', interface='socketcan'):
         # try:
         #     wiringpi.wiringPiSetupGPIO()
         #     wiringpi.pinMode(2, GPIO.OUTPUT)
@@ -231,7 +232,7 @@ class ServoDriveController:
         self.auto_step = None # 当前自动程序所在状态
         self.count = 1 # 切换自动与手动 
         #控制不同状态下的发布频率,初始化默认为一秒1次
-        self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+        self.publish_timer = rospy.Timer(rospy.Duration(20.0), lambda event: self.publish_state())
         # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
         # PID参数
         # self.pid_kp = 100.0
@@ -256,18 +257,20 @@ class ServoDriveController:
 
         self.state_pub = rospy.Publisher('/robot_state', String, queue_size=10)
         self.motor_cmd_pub = rospy.Publisher('/motor_cmd', Int8, queue_size=10)
-        rospy.Subscriber('/robot_cmd', String, self.status_callback)
+        # rospy.Subscriber('/robot_cmd', String, self.status_callback)
         rospy.Subscriber('/inspvae_data', INSPVAE, self.imu_callback)
         rospy.Subscriber('/battery_status', BatteryStatus, self.battery_status_callback)
         rospy.Subscriber('/relay_status', Bool, self.relay_callback)
         rospy.Subscriber('/environment_data', Environment, self.environment_data_callback)
-
+        rospy.Subscriber('/sensors', UInt8, self.sensors_callback)
+        rospy.Subscriber('/robot_cmd', String, self.mqtt_state_callback)
 
         # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
         self.wind_speed = None
         self.wind_direction = None
         self.illuminance = None
         self.rainfall = None
+        self.sensors = None
 
 
     def environment_data_callback(self, msg):
@@ -275,7 +278,54 @@ class ServoDriveController:
         self.wind_direction = msg.wind_direction
         self.illuminance = msg.illuminance
         self.rainfall = msg.rainfall
+    def sensors_callback(self, msg):
+        self.sensors = msg.data
+    def mqtt_state_callback(self, msg):
+        """解析MQTT JSON消息并控制电机"""
+        global mqtt_completed, mqtt_running_state
+        try:
+            # 解析JSON字符串
+            mqtt_data = json.loads(msg.data)
+            
+            # 提取关键字段（容错处理，避免字段缺失报错）
+            mqtt_completed = mqtt_data.get("complete_state", False)
+            mqtt_running_state = mqtt_data.get("status", "")
+            
+            rospy.loginfo(f"解析MQTT消息：complete_state={mqtt_completed}, status={mqtt_running_state}")
 
+            # 根据状态控制电机
+            # 1. complete_state为True：启动正向JOG
+            if mqtt_completed:
+                rospy.loginfo("MQTT指令：complete_state=True，启动正向JOG")
+                self.call_ros_service("/start_forward_jog")
+            
+            # 2. status为"START"：启动正向JOG
+            if mqtt_running_state == "START":
+                rospy.loginfo("MQTT指令：status=START，启动反向JOG")
+                self.call_ros_service("/start_reverse_jog")
+
+        except json.JSONDecodeError as e:
+            rospy.logwarn(f"MQTT消息JSON解析失败：{str(e)}，原始消息：{msg.data}")
+        except Exception as e:
+            rospy.logwarn(f"MQTT消息处理异常：{str(e)}")
+
+    def call_ros_service(self, service_name):
+        """封装ROS服务调用（避免subprocess依赖）"""
+        try:
+            # 等待服务可用
+            rospy.wait_for_service(service_name, timeout=1.0)
+            # 创建服务代理
+            service_proxy = rospy.ServiceProxy(service_name, Trigger)
+            # 调用服务
+            response = service_proxy()
+            if response.success:
+                rospy.loginfo(f"调用服务{service_name}成功：{response.message}")
+            else:
+                rospy.logwarn(f"调用服务{service_name}失败：{response.message}")
+        except rospy.ServiceException as e:
+            rospy.logwarn(f"服务{service_name}调用异常：{str(e)}")
+        except rospy.ROSException as e:
+            rospy.logwarn(f"服务{service_name}不可用：{str(e)}")
     def set_state(self, new_state):
         if new_state not in self.status_config:
             rospy.logwarn(f"尝试设置无效状态: {new_state}")
@@ -307,20 +357,20 @@ class ServoDriveController:
         if new_state == "STOP":
             # self.auto_mode = False
             self.elevator_stage = 0
-            if self.publish_timer is not None:
-                self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+            # if self.publish_timer is not None:
+            #     self.publish_timer.shutdown()
+            #     self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
                     # 1. 防止重复启动线程（若已运行则先停止）
-                self.stop_heartbeat()
+                # self.stop_heartbeat()
             # if self.fault_check_timer is not None:    
                 # self.fault_check_timer.shutdown()
                 # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
-            threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
-        else: #其他状态保持原频率
-            if self.publish_timer is not None:
-                self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+            # threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
+        # else: #其他状态保持原频率
+            # if self.publish_timer is not None:
+            #     self.publish_timer.shutdown()
+            #     self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
             # if self.fault_check_timer is not None:    
                 # self.fault_check_timer.shutdown()
                 # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
@@ -372,48 +422,15 @@ class ServoDriveController:
     def publish_state(self):
         """发布机器人状态信息，包含速度和状态"""
         try:
-            # 更新计数器
-            self.velocity_publish_count += 1
-            
-            # 只有在达到间隔时才调用get_actual_velocity获取新速度数据
-            if self.velocity_publish_count >= self.velocity_publish_interval:
-                # 获取新的速度数据
-                # self.last_velocity_up = self.get_actual_velocity(3)
-                # self.last_velocity_low = self.get_actual_velocity(2)
-                # self.last_velocity_brush = self.get_actual_velocity(4)
-                self.velocity_publish_count = 0  # 重置计数器
-            
-            # 始终使用最新的速度值（可能是新获取的，也可能是之前保存的）
-            velocity_up = self.last_velocity_up
-            velocity_low = self.last_velocity_low
-            velocity_brush = self.last_velocity_brush
 
             state_msg = {
-                "status": self.current_status,
-                "battery": self.battery_remaining, # 电池百分比,
-                "battery_temperatures": self.battery_temperatures, # 电池温度，共3个
-                "battery_total_voltage": self.battery_total_voltage, # 电池总电压
-                "battery_current": self.battery_current, # 电池电流
-                "progress": self.progress,
-                "imu_yaw": round(self.imu_yaw, 2) if self.imu_yaw is not None else 0.00,
-                # "velocity_up": round(velocity_up, 2),  # 保留两位小数，数值类型
-                # "velocity_low": round(velocity_low, 2),
-                # "velocity_brush": round(velocity_brush, 2), # 20减速器，不用转换
-                "sensors_status": self.sensors_status,  # 超声波传感器状态
-                "device_status": {
-                "main_board": self.main_board,
-                "imu_sensor": self.imu_sensor,
-                "motor_driver": self.motor_driver,
-                "comm_module": True  },
-                "complete_state":self.complete_state, # 任务完成状态
-                "auto_mode": self.auto_mode, # 自动模式开关,默认开
-                "relay_status": self.relay_status,
+                "sensors": self.sensors,  # 接近开关传感器状态
                 "wind_speed": self.wind_speed,
                 "wind_direction": self.wind_direction,
                 "illuminance": self.illuminance,
                 "rainfall":self.rainfall,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
-                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
+                "timestamp_station": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
             self.state_pub.publish(json.dumps(state_msg))
         except Exception:
@@ -684,24 +701,24 @@ class ServoDriveController:
     
     def configure_motor(self, motor_id, velocity, acceleration, deceleration):
         # 检查电机故障
-        fault_code = self.read_fault_code(motor_id)
+        # fault_code = self.read_fault_code(motor_id)
         # saving_mode = self.read_energy_saving_mode(motor_id)
         # set_torque_zero_param = self.set_torque_zero_param(motor_id,"Fn_04c",100)
         # max_torque = self.get_max_torque(motor_id)
         # actual_torque = self.get_actual_torque(motor_id)
-        if fault_code and fault_code != 0:
-            rospy.logwarn(f"电机 {motor_id} 存在故障 (0x{fault_code:04X}), 尝试清除...")
-            self.clear_fault(motor_id)
-            time.sleep(0.3)  # 等待故障清除
+        # if fault_code and fault_code != 0:
+        #     rospy.logwarn(f"电机 {motor_id} 存在故障 (0x{fault_code:04X}), 尝试清除...")
+        #     self.clear_fault(motor_id)
+        #     time.sleep(0.3)  # 等待故障清除
 
-        rospy.loginfo(f"配置电机 {motor_id}: 速度={int(velocity/rate)}, 加速度={acceleration}, 减速度={deceleration}")
-        self.start_motor(motor_id)
-        self.set_velocity_mode(motor_id)
-        self.set_target_velocity(motor_id, velocity)  #输出转换为脉冲/秒
+        # rospy.loginfo(f"配置电机 {motor_id}: 速度={int(velocity/rate)}, 加速度={acceleration}, 减速度={deceleration}")
+        # self.start_motor(motor_id)
+        # self.set_velocity_mode(motor_id)
+        # self.set_target_velocity(motor_id, velocity)  #输出转换为脉冲/秒
         # self.set_acceleration(motor_id, acceleration)
         # self.set_deceleration(motor_id, deceleration)
         self.enable_drive(motor_id)
-        self.start_heartbeat(motor_id)
+        # self.start_heartbeat(motor_id)
 
 
     def shutdown(self):
@@ -714,13 +731,13 @@ class ServoDriveController:
         self.disable_drive(2)
         self.disable_drive(3)
         self.disable_drive(4)
-        self.stop_heartbeat()
+        # self.stop_heartbeat()
 
         self.bus.shutdown()
 
     @staticmethod
-    def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
-    # def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
+    # def load_config(config_file="/home/orangepi/demo01/src/motor_can/config/servo_config.yaml"):
+    def load_config(config_file="/home/ubuntu/demo01/src/motor_can/config/servo_config.yaml"):
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
@@ -1748,7 +1765,7 @@ def main():
     try:
     # 每0.05秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.05), controller.execute_state)
-        controller.set_state("STOP")
+        controller.set_state("START")
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")
