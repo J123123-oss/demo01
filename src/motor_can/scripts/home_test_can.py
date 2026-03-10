@@ -430,7 +430,7 @@ class ServoDriveController:
                 "illuminance": self.illuminance,
                 "rainfall":self.rainfall,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
-                "timestamp_station": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
+                "timestamp_station_dock": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
             self.state_pub.publish(json.dumps(state_msg))
         except Exception:

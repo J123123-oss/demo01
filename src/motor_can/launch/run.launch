@@ -8,7 +8,7 @@
         <param name="~user" value="gf-mounted"/>
         <param name="~password" value="20230810"/>
         <param name="~topic_status" value="robot/$(arg robot_ID)/status"/>
-        <param name="~topic_cmd" value="robot/$(arg robot_ID)/status"/>
+        <param name="~topic_cmd" value="dock/$(arg robot_ID)/status"/>
         <param name="~client_id" value="python-mqtt-client-$(arg robot_ID)"/>
         <param name="~topic_command" value="robot/$(arg robot_ID)/command"/>
         <param name="~topic_result" value="robot/$(arg robot_ID)/result"/>
