@@ -12,8 +12,8 @@ from pymodbus.exceptions import ModbusException
 from serial_comms.msg import Environment  # 气象站消息类型
 
 # ===================== 公共配置 =====================
-# SERIAL_PORT = "/dev/jog-weather"  # 共享串口
-SERIAL_PORT = "/dev/ttyUSB0"  # 共享串口
+SERIAL_PORT = "/dev/jog-weather"  # 共享串口
+# SERIAL_PORT = "/dev/ttyUSB0"  # 共享串口
 BAUDRATE = 9600  
 PARITY = "N"
 STOPBITS = 1
@@ -82,6 +82,9 @@ class JogWeatherControlNode:
         self.start_reverse_service = rospy.Service("/start_reverse_jog", Trigger, self.start_reverse_callback)
         self.stop_jog_service = rospy.Service("/stop_jog", Trigger, self.stop_jog_callback)
         rospy.loginfo("电机服务就绪：/start_forward_jog /start_reverse_jog /stop_jog")
+        self.trigger_value = 0
+        self.io_status = 0
+
 
         # 5. 订阅MQTT JSON消息话题
         # self.mqtt_sub = rospy.Subscriber(MQTT_TOPIC, String, self.mqtt_state_callback, queue_size=10)
@@ -155,25 +158,24 @@ class JogWeatherControlNode:
             if response.isError():
                 rospy.logerr(f"读取传感器失败：{response}")
                 return 0  # 读取失败时返回0
-
-            io_status = response.registers[0]
+            self.io_status = response.registers[0]
             if motor_current_direction == "FORWARD":
-                trigger_value = io_status & SENSOR_TRIGGERED_MASK  # 计算触发掩码值
+                self.trigger_value = self.io_status & SENSOR_TRIGGERED_MASK  # 计算触发掩码值
             elif motor_current_direction == "REVERSE":
-                trigger_value = io_status & SENSOR_RESET_MASK  # 计算重置掩码值
+                self.trigger_value = self.io_status & SENSOR_RESET_MASK  # 计算重置掩码值
             else:
                 rospy.logdebug("无效的电机方向")
                 return 0
             # 日志输出触发状态
-            if trigger_value == SENSOR_TRIGGERED_MASK:
-                rospy.loginfo(f"到位传感器触发！IO状态：0x{io_status:04X}，触发掩码值：{trigger_value}")
+            if self.trigger_value == SENSOR_TRIGGERED_MASK:
+                rospy.loginfo(f"到位传感器触发！IO状态：0x{self.io_status:04X}，触发掩码值：{self.trigger_value}")
             else:
-                s1 = (io_status & (1 << SENSOR1_BIT)) != 0
-                s2 = (io_status & (1 << SENSOR2_BIT)) != 0
-                s3 = (io_status & (1 << SENSOR3_BIT)) != 0
-                rospy.loginfo(f"传感器状态 - 1：{s1}，2：{s2}，3：{s3}，触发掩码值：{trigger_value}")
+                s1 = (self.io_status & (1 << SENSOR1_BIT)) != 0
+                s2 = (self.io_status & (1 << SENSOR2_BIT)) != 0
+                s3 = (self.io_status & (1 << SENSOR3_BIT)) != 0
+                rospy.loginfo(f"传感器状态 - 1：{s1}，2：{s2}，3：{s3}，触发掩码值：{self.trigger_value}")
             
-            return trigger_value  # 返回实际的掩码计算值
+            return self.trigger_value  # 返回实际的掩码计算值
 
         except ModbusException as e:
             rospy.logerr(f"Modbus错误（读取传感器）：{e}")
@@ -219,7 +221,7 @@ class JogWeatherControlNode:
                         self.send_motor_jog_cmd(REVERSE_JOG_CMD)
                         rospy.logdebug("发送反向JOG指令")
                     last_jog_send_time = current_time
-
+                self.read_motor_sensor()
                 # 前进到位
                 if motor_current_direction == "FORWARD" and self.read_motor_sensor() == SENSOR_TRIGGERED_MASK:
                     motor_current_direction = "STOP"
@@ -232,30 +234,20 @@ class JogWeatherControlNode:
 
                 # 发布电机运行状态
                 self.motor_status_pub.publish(Bool(data=True))
-                # 2. 读取传感器状态并发布（核心新增逻辑）
-                sensor_trigger_value = self.read_motor_sensor()
-                # 构建UInt8消息并发布
-                sensors_msg = UInt8()
-                sensors_msg.data = sensor_trigger_value
-                self.proximity_sensors_pub.publish(sensors_msg)
-                rospy.logdebug(f"发布传感器状态：{sensor_trigger_value}")
+                
             else:
                 # 停止电机
                 self.send_motor_jog_cmd(STOP_CMD)
                 motor_current_direction = "STOP"
                 self.motor_status_pub.publish(Bool(data=False))
                 # 2. 读取传感器状态并发布（核心新增逻辑）
-                sensor_trigger_value = self.read_motor_sensor()
-                # 构建UInt8消息并发布
-                sensors_msg = UInt8()
-                sensors_msg.data = 0
-                self.proximity_sensors_pub.publish(sensors_msg)
-                rospy.logdebug(f"发布传感器状态：{sensor_trigger_value}")
+                sensor_trigger_value = self.io_status
+                
 
-            # sensors =UInt8()
-            # sensors.data = self.read_motor_sensor()
-            # self.proximity_sensors_pub(sensors)
-
+            # 构建UInt8消息并发布
+            sensors_msg = UInt8()
+            sensors_msg.data = self.io_status
+            self.proximity_sensors_pub.publish(sensors_msg)
             time.sleep(MOTOR_LOOP_INTERVAL)
 
     # ===================== 电机控制服务（正向/反向/停止） =====================

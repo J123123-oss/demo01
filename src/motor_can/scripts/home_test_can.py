@@ -286,7 +286,10 @@ class ServoDriveController:
         try:
             # 解析JSON字符串
             mqtt_data = json.loads(msg.data)
-            
+            # 仅处理complete_state和status字段
+            if "complete_state" not in mqtt_data and "status" not in mqtt_data:
+                rospy.logwarn(f"Ignore: {msg.data}")
+                return
             # 提取关键字段（容错处理，避免字段缺失报错）
             mqtt_completed = mqtt_data.get("complete_state", False)
             mqtt_running_state = mqtt_data.get("status", "")
@@ -295,12 +298,12 @@ class ServoDriveController:
 
             # 根据状态控制电机
             # 1. complete_state为True：启动正向JOG
-            if mqtt_completed:
+            if mqtt_completed and not mqtt_running_state == "START":
                 rospy.loginfo("MQTT指令：complete_state=True，启动正向JOG")
                 self.call_ros_service("/start_forward_jog")
             
-            # 2. status为"START"：启动正向JOG
-            if mqtt_running_state == "START":
+            # 2. status为"START"：启动反向JOG
+            if mqtt_running_state == "START" and not mqtt_completed:
                 rospy.loginfo("MQTT指令：status=START，启动反向JOG")
                 self.call_ros_service("/start_reverse_jog")
 
