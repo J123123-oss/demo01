@@ -83,7 +83,7 @@ class MQTTClient:
             subscribe_topics = [
                 (self.topic_cmd, 1),        # MQTT→ROS 控制指令
                 (self.topic_command, 1),    # 终端命令
-                (self.topic_status, 1)      # 可选：如果需要监听自身发布的status话题
+                # (self.topic_status, 1)      # 可选：如果需要监听自身发布的status话题
             ]
             # 批量订阅
             client.subscribe(subscribe_topics)
@@ -115,9 +115,9 @@ class MQTTClient:
             elif msg.topic == self.topic_command:
                 self.handle_terminal_command(payload)
 
-            # 可选：处理status话题的消息（如果需要监听）
-            elif msg.topic == self.topic_status:
-                rospy.loginfo(f"收到status话题消息: {payload}")
+            # # 可选：处理status话题的消息（如果需要监听）
+            # elif msg.topic == self.topic_status:
+            #     rospy.loginfo(f"收到status话题消息: {payload}")
 
         except Exception as e:
             rospy.logerr(f"处理MQTT消息失败: {str(e)}\n{traceback.format_exc()}")

@@ -93,6 +93,8 @@ class ServoDriveController:
 
         self.last_mqtt_completed = False  # 保存上一次 complete_state 状态，用于脉冲沿检测
         self.last_mqtt_status = ""  # 保存上一次 status 状态，用于脉冲沿检测
+        self.mqtt_completed = False
+        self.mqtt_running_state = "START"
 
         #设置状态列表
         self.status_list = [
@@ -234,8 +236,8 @@ class ServoDriveController:
         self.auto_mode = True #默认自动模式
         self.auto_step = None # 当前自动程序所在状态
         self.count = 1 # 切换自动与手动 
-        #控制不同状态下的发布频率,初始化默认为一秒1次
-        self.publish_timer = rospy.Timer(rospy.Duration(20.0), lambda event: self.publish_state())
+        #控制不同状态下的发布频率,初始化默认为5秒/次
+        self.publish_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.publish_state())
         # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
         # PID参数
         # self.pid_kp = 100.0
@@ -268,14 +270,15 @@ class ServoDriveController:
         rospy.Subscriber('/sensors', UInt8, self.sensors_callback)
         rospy.Subscriber('/robot_cmd', String, self.mqtt_state_callback)
         
-        self.mqtt_state_timer = rospy.Timer(rospy.Duration(60.0), self.mqtt_state_timer_callback)
+        self.mqtt_state_timer = rospy.Timer(rospy.Duration(10.0), self.mqtt_state_timer_callback)
 
         # self.fault_check_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.check_and_clear_faults())
         self.wind_speed = None
         self.wind_direction = None
         self.illuminance = None
         self.rainfall = None
-        self.sensors = None
+        self.sensors = None # 检测停机仓传感器触发
+        self.last_sensors = None
         self.last_mqtt_msg_data = None  # 保存最后一次收到的MQTT消息数据
 
 
@@ -286,6 +289,12 @@ class ServoDriveController:
         self.rainfall = msg.rainfall
     def sensors_callback(self, msg):
         self.sensors = msg.data
+        if self.sensors & 0x02 == 0x02 and self.last_sensors & 0x02 != 0x02:
+            self.set_state("STOP")
+        elif self.sensors & 0x08 == 0x08 and self.last_sensors & 0x08 != 0x08:
+            self.set_state("STOP")
+        
+        self.last_sensors = self.sensors
     def mqtt_state_callback(self, msg):
         """订阅者回调：收到MQTT消息时触发"""
         self.last_mqtt_msg_data = msg.data
@@ -299,36 +308,41 @@ class ServoDriveController:
     
     def process_mqtt_state(self, msg_data):
         """解析MQTT JSON消息并控制电机（核心处理逻辑）"""
-        global mqtt_completed, mqtt_running_state
+        
         try:
             mqtt_data = json.loads(msg_data)
             if "complete_state" not in mqtt_data and "status" not in mqtt_data:
                 rospy.logwarn(f"Ignore: {msg_data}")
                 return
             
-            mqtt_completed = mqtt_data.get("complete_state", False)
-            mqtt_running_state = mqtt_data.get("status", "START")  # 手动赋值默认值为START状态，后期修改
+            self.mqtt_completed = mqtt_data.get("complete_state", False)
+            self.mqtt_running_state = mqtt_data.get("status", "START")  # 手动赋值默认值为START状态，后期修改
             mqtt_full_charge = mqtt_data.get("full_charge", False)
-            rospy.loginfo(f"解析MQTT消息：complete_state={mqtt_completed}, status={mqtt_running_state}, full_charge={mqtt_full_charge}")
+            rospy.loginfo(f"解析MQTT消息：complete_state={self.mqtt_completed}, status={self.mqtt_running_state}, full_charge={mqtt_full_charge}")
 
             # 脉冲沿检测：只有状态发生变化时才触发，避免重复启动
             # 1. complete_state 从 False 变为 True：启动正向JOG（上升沿检测）
-            if mqtt_completed and not self.last_mqtt_completed and mqtt_running_state != "START":
+            if self.mqtt_completed and not self.last_mqtt_completed and self.mqtt_running_state != "START":
                 rospy.loginfo("MQTT指令：complete_state=True（上升沿），启动正向JOG")
                 self.call_ros_service("/start_forward_jog")
+                self.set_state("START")
+
             
             # 2. status 从非"START"变为"START"：启动反向JOG（上升沿检测）
-            if mqtt_running_state == "START" and self.last_mqtt_status != "START" or \
-                mqtt_running_state == "UNLOADING" and self.last_mqtt_status != "UNLOADING" or \
-                mqtt_running_state == "LOADING" and self.last_mqtt_status != "LOADING" or \
+            if self.mqtt_running_state == "START" and self.last_mqtt_status != "START" or \
+                self.mqtt_running_state == "UNLOADING" and self.last_mqtt_status != "UNLOADING" or \
+                self.mqtt_running_state == "LOADING" and self.last_mqtt_status != "LOADING" or \
                 mqtt_full_charge:
                 
                 rospy.loginfo("MQTT指令：status=START（上升沿），启动反向JOG")
                 self.call_ros_service("/start_reverse_jog")
+                self.set_state("START")
+                
+                
 
             # 更新保存的状态
-            self.last_mqtt_completed = mqtt_completed
-            self.last_mqtt_status = mqtt_running_state
+            self.last_mqtt_completed = self.mqtt_completed
+            self.last_mqtt_status = self.mqtt_running_state
 
         except json.JSONDecodeError as e:
             rospy.logwarn(f"MQTT消息JSON解析失败：{str(e)}，原始消息：{msg.data}")
@@ -383,20 +397,20 @@ class ServoDriveController:
         if new_state == "STOP":
             # self.auto_mode = False
             self.elevator_stage = 0
-            # if self.publish_timer is not None:
-            #     self.publish_timer.shutdown()
-            #     self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+            if self.publish_timer is not None:
+                self.publish_timer.shutdown()
+                self.publish_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.publish_state())
                     # 1. 防止重复启动线程（若已运行则先停止）
                 # self.stop_heartbeat()
             # if self.fault_check_timer is not None:    
                 # self.fault_check_timer.shutdown()
                 # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
-            # threading.Thread(target=self.delayed_publish_freq_switch,args=(1,),daemon=True).start()
-        # else: #其他状态保持原频率
-            # if self.publish_timer is not None:
-            #     self.publish_timer.shutdown()
-            #     self.publish_timer = rospy.Timer(rospy.Duration(1.0), lambda event: self.publish_state())
+            threading.Thread(target=self.delayed_publish_freq_switch,args=(10,),daemon=True).start()
+        else: #其他状态保持原频率
+            if self.publish_timer is not None:
+                self.publish_timer.shutdown()
+                self.publish_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.publish_state())
             # if self.fault_check_timer is not None:    
                 # self.fault_check_timer.shutdown()
                 # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
@@ -1169,7 +1183,7 @@ class ServoDriveController:
         # self.current_velocity_low = self.get_actual_velocity(2)
         # self.current_velocity_brush = self.get_actual_velocity(4)
     
-    def delayed_publish_freq_switch(self, delay_sec=3):
+    def delayed_publish_freq_switch(self, delay_sec=10.0):
         # 延时后切换到低频率
         time.sleep(delay_sec)
         if self.current_status == "STOP":

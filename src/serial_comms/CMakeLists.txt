@@ -126,12 +126,6 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
 )
-add_executable(weather_station src/weather_station.cpp)
-target_link_libraries(weather_station
-  ${catkin_LIBRARIES}
-  modbus  # 链接modbus库
-)
-add_dependencies(weather_station ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 
 # add_executable(wtrtk_serial_driver src/wtrtk_serial_driver.cpp)

@@ -2,7 +2,7 @@
 <!-- 设置机器人ID robot_ID , 也可以在launch启动时指定 -->
 <arg name="robot_ID" default="HEJIN_Huaxinyuan" />
     <node pkg="motor_can" type="home_test_can.py" name="home_test_can" output="screen"/>
-    <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge" output="screen">
+    <node pkg="robot_mqtt" type="mqtt_ros_bridge.py" name="mqtt_ros_bridge">
         <param name="~broker" value="121.40.57.48"/>
         <param name="~port" value="1883"/>
         <param name="~user" value="gf-mounted"/>
@@ -10,8 +10,8 @@
         <param name="~topic_status" value="robot/$(arg robot_ID)/status"/>
         <param name="~topic_cmd" value="dock/$(arg robot_ID)/status"/>
         <param name="~client_id" value="python-mqtt-client-dock-$(arg robot_ID)"/>
-        <param name="~topic_command" value="robot/$(arg robot_ID)/command"/>
-        <param name="~topic_result" value="robot/$(arg robot_ID)/result"/>
+        <param name="~topic_command" value="dock/$(arg robot_ID)/command"/>
+        <param name="~topic_result" value="dock/$(arg robot_ID)/result"/>
 
     </node>
     <node pkg="serial_comms" type="jog_weather_station.py" name="jog_weather_station" output="screen"/>
