@@ -34,13 +34,13 @@ class ServoDriveController:
         self.main_board = True # 主控板状态MQTT
         self.imu_sensor = True # IMU传感器状态MQTT
         self.motor_driver =True # 电机驱动器状态MQTT
-        self.motor_base = 700 #350
-        self.base_speed = 34000 # 17000   #设置后退基础速度值  * 0.8 > * 1
+        self.motor_base = 700*0.8 #350
+        self.base_speed = 34000*0.8 # 17000   #设置后退基础速度值  * 0.8 > * 1
         self.brush_speed = rospy.get_param('~brush_speed', 108800) # 设置滚刷速度,1600 * rate
         self.flag = 0  # 用于后退时的速度方向标志，1: IMU>0
         self.brush_forward = rospy.get_param('~brush_forward', False)# 默认反转 True=正转，False=反转
 
-        self.speed_pluse_max = 760*rate #25840  #(380*rate)  #23800 #32467      #23800   # 17000
+        self.speed_pluse_max = 760*0.8*rate #25840  #(380*rate)  #23800 #32467      #23800   # 17000
         # 计时阶段参数
         self.reversed_start_time = None  # 记录首次检测到偏差的时间
         self.REVERSE_TIME_THRESHOLD = 3.0  # 需要持续的时间阈值(秒)
@@ -203,7 +203,7 @@ class ServoDriveController:
         self.pid_kp = 100   # 降低比例增益减少振荡             原100
         self.pid_ki = 0.1  # 提高积分增益增强对持续偏差的纠正   1.5
         self.pid_kd = 10   # 大幅提高微分增益抑制快速变化       20 
-        self.pid_correction_max = 150  # 放宽输出限制        200
+        self.pid_correction_max = 150*0.8  # 放宽输出限制        200
 
 
         self.progress = 0   # 进度百分比，0-100
@@ -242,7 +242,7 @@ class ServoDriveController:
         #     self.need_speed_mode_init = True
         # 自动模式记录当前状态，UPSTOP与LOWSTOP待确认
         # if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "LOADING", "UNLOADING"]:
-        if self.auto_mode and new_state in ["FORWARD", "BACKWARD", "UNLOADING"]:
+        if self.auto_mode and new_state in ["FORWARD", "BACKWARD"]:
             self.auto_step = new_state
             # print("auto_step:",self.auto_step)
         # 初始化为速度模式，添加恢复状态
@@ -491,11 +491,42 @@ class ServoDriveController:
             
         except json.JSONDecodeError as e:
             rospy.logerr(f"解析IMU数据失败: {e}")
+    def voltage_to_soc(self, voltage):
+        """
+        13串三元锂电池 电压 → 电量百分比（非线性插值）
+        :param voltage: 电池总电压 V
+        :return: soc 电量百分比 0~100
+        """
+        # 电压-SOC 对应表（升序排列）
+        volt_table = [37.7, 41.6, 43.5, 45.3, 47.1, 48.3, 49.2, 50.1, 50.9, 51.7, 52.5, 53.1, 53.4]
+        soc_table =  [  0,    0,    5,   10,   20,   30,   40,   50,   60,   70,   80,   90,  100]
+
+        # 越界处理
+        if voltage >= 53.4:
+            return 100
+        if voltage <= 37.7:
+            return 0
+
+        # 非线性插值（找到区间，线性估算）
+        for i in range(len(volt_table)-1):
+            v_low = volt_table[i]
+            v_high = volt_table[i+1]
+            s_low = soc_table[i]
+            s_high = soc_table[i+1]
+
+            if v_low <= voltage <= v_high:
+                # 区间内插值计算
+                soc = s_low + (voltage - v_low) * (s_high - s_low) / (v_high - v_low)
+                return round(soc, 1)
+
+        return 0
     def battery_status_callback(self, msg):
 
-        self.battery_remaining = msg.batttery_remaining  # 电池百分比
+        # self.battery_remaining = msg.batttery_remaining  # 电池百分比
         self.battery_total_voltage = round(msg.total_voltage, 2) 
         self.battery_current = round(msg.current, 2)
+        self.battery_remaining = self.voltage_to_soc(self.battery_total_voltage)  # 电池百分比估计
+        # rospy.loginfo(self.battery_remaining)
          # 格式化温度列表，保留一位小数
         self.battery_temperatures = [round(t, 1) for t in msg.temperatures] if hasattr(msg, "temperatures") else []
 
@@ -543,6 +574,8 @@ class ServoDriveController:
         self.send_command(motor_id, [0x2F, 0x60, 0x60, 0x00, 0x03, 0x00, 0x00, 0x00])
         
     def set_target_velocity(self, motor_id, velocity):
+        # 解决默认速度出现float报错
+        velocity = int(velocity)
         data = [
             0x23, 0xFF, 0x60, 0x00,
             velocity & 0xFF,
@@ -728,6 +761,7 @@ class ServoDriveController:
                         # print("unloading_start_time:",self.unloading_start_time)
                 else:
                     rospy.loginfo("充电状态，等待接近开关触发")
+                    self.set_state("STOP")
                 # 在UNLOADING状态，检查定时器
                 if self.current_status == "UNLOADING":
                     while hasattr(self, 'unloading_start_time') and self.unloading_start_time is not None:
