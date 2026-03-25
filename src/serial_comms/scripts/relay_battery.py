@@ -357,7 +357,7 @@ class BatteryRelayNode:
             # 检查是否捕获到继电器响应
             if self.relay_response_buffer:
                 response = self.relay_response_buffer
-                rospy.loginfo("接收继电器状态响应: %s", ' '.join(['%02X' % b for b in response]))
+                # rospy.loginfo("接收继电器状态响应: %s", ' '.join(['%02X' % b for b in response]))
                 
                 if len(response) >= 4 and response[0] == self.relay_address and response[1] == 0x01:
                     byte_count = response[2]
@@ -367,7 +367,7 @@ class BatteryRelayNode:
                         self.current_relay_state = relay_status
                         return relay_status
             # 如果响应解析失败，返回上一次已知状态
-            rospy.logwarn("继电器状态解析失败，使用上一次已知状态")
+            # rospy.logwarn("继电器状态解析失败，使用上一次已知状态")
             return last_known_state
         
         except Exception as e:
@@ -392,9 +392,9 @@ class BatteryRelayNode:
             if byte_val == 0xDD:
                 # 1. 若缓冲区有旧数据，先尝试解析
                 if len(self.battery_buffer) > 0:
-                    rospy.loginfo(f"电池缓冲区当前长度: {len(self.battery_buffer)}，尝试解析旧数据")
+                    # rospy.loginfo(f"电池缓冲区当前长度: {len(self.battery_buffer)}，尝试解析旧数据")
                     self.process_battery_buffer()  # 尝试处理旧数据
-                    rospy.logwarn("电池缓冲区已有数据，已尝试解析，现在处理新帧")
+                    # rospy.logwarn("电池缓冲区已有数据，已尝试解析，现在处理新帧")
                 
                 # 2. 清空缓冲区并添加新帧头
                 self.battery_buffer.clear()
@@ -409,7 +409,7 @@ class BatteryRelayNode:
             return
         min_temp = min(self.current_temperatures)
         max_temp = max(self.current_temperatures)
-        rospy.loginfo(f"温度监测 - 最低: {min_temp}°C, 最高: {max_temp}°C, 当前继电器状态: {'开启' if self.current_relay_state else '关闭'}")
+        # rospy.loginfo(f"温度监测 - 最低: {min_temp}°C, 最高: {max_temp}°C, 当前继电器状态: {'开启' if self.current_relay_state else '关闭'}")
         # 高温触发：最低温度超阈值且继电器开启 → 关闭
         if min_temp >= self.temperature_threshold_high and self.current_relay_state:
             rospy.loginfo(f"最低温度 {min_temp}°C 超过阈值 {self.temperature_threshold_high}°C，关闭继电器")
@@ -466,7 +466,7 @@ class BatteryRelayNode:
                     self.battery_read_fail_count = 0
                     self.battery_check_interval = self.default_battery_interval
                     self.relay_check_interval = self.default_relay_interval
-                    rospy.loginfo(f"电池解析成功，恢复默认查询间隔 - 电池: {self.default_battery_interval}s, 继电器: {self.default_relay_interval}s")
+                    # rospy.loginfo(f"电池解析成功，恢复默认查询间隔 - 电池: {self.default_battery_interval}s, 继电器: {self.default_relay_interval}s")
                     
                     self.current_state = STATE_READY
                     self.battery_success_count += 1
@@ -512,7 +512,7 @@ class BatteryRelayNode:
                         # 定期输出统计信息
                         if self.battery_query_count > 0:
                             battery_success_rate = (self.battery_success_count / self.battery_query_count) * 100
-                            rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
+                            # rospy.loginfo(f"电池查询成功率: {battery_success_rate:.2f}% ({self.battery_success_count}/{self.battery_query_count})")
             
             self.rate.sleep()
 
@@ -573,7 +573,7 @@ class BatteryRelayNode:
                         data = self.ser.read(avail)
                         # 打印原始数据
                         hex_str = ' '.join(['%02X' % b for b in data])
-                        rospy.loginfo(f"收到485原始数据: {hex_str}")
+                        # rospy.loginfo(f"收到485原始数据: {hex_str}")
                         # 分离处理继电器和电池数据
                         self.process_relay_data(data)  # 优先处理继电器响应
                         self.process_battery_data(data)  # 处理电池数据
