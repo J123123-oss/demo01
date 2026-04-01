@@ -28,10 +28,10 @@ restart_can() {
 # 初始启动
 restart_can
 
-# 后台循环检测（每30秒）
+# 后台循环检测（每5秒）
 (
     while true; do
-        sleep 30
+        sleep 5
         if ! ip link show can0 >/dev/null 2>&1; then
             echo "检测到can0掉线，正在重启..."
             restart_can

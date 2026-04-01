@@ -73,13 +73,9 @@ class DigitalInputReader:
             return False  # 初始化失败
 
     def reconnect_can_bus(self):
-        """重连CAN总线"""
-        rospy.logwarn("尝试重连CAN总线...")
-        try:
-            if self.bus is not None:
-                self.bus.shutdown()
-        except Exception:
-            pass
+        """轻量级重连：只重建，不暴力关闭，不冲突"""
+        rospy.warn("proximity sensor:CAN 链路失效，尝试重建连接...")
+        self.bus = None  # 只清空，不调用 shutdown
         self._init_can()
 
     def _set_can_baudrate(self):
@@ -112,7 +108,7 @@ class DigitalInputReader:
             rospy.loginfo("Baudrate setting command sent. Device requires power cycle to take effect.")
             
         except (can.CanError, OSError) as e:
-            rospy.logerr(f"CAN通信错误: {str(e)}，尝试重连...")
+            rospy.logerr(f"CAN通信错误: {str(e)}")
             self.reconnect_can_bus()
         except Exception as e:
             rospy.logerr(f"Failed to set baudrate: {str(e)}")
@@ -124,7 +120,7 @@ class DigitalInputReader:
             try:
                 response = self.bus.recv(timeout - (time.time() - start_time))
             except (can.CanError, OSError) as e:
-                rospy.logerr(f"CAN通信错误: {str(e)}，尝试重连...")
+                rospy.logerr(f"CAN通信错误: {str(e)}")
                 self.reconnect_can_bus()
                 continue
             if response:
@@ -182,7 +178,7 @@ class DigitalInputReader:
             self._process_input_data(input_byte)
            
         except (can.CanError, OSError) as e:
-            rospy.logerr(f"CAN通信错误: {str(e)}，尝试重连...")
+            rospy.logerr(f"CAN通信错误: {str(e)}")
             self.reconnect_can_bus()
         except Exception as e:
             rospy.logerr(f"Unexpected error: {str(e)}")

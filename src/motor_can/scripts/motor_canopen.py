@@ -548,13 +548,9 @@ class ServoDriveController:
                 time.sleep(3)
 
     def reconnect_can_bus(self):
-        """重连CAN总线"""
-        rospy.logwarn("尝试重连CAN总线...")
-        try:
-            if self.bus is not None:
-                self.bus.shutdown()
-        except Exception:
-            pass
+        """轻量级重连：只重建，不暴力关闭，不冲突"""
+        rospy.warn("motor:CAN 链路失效，尝试重建连接...")
+        self.bus = None  # 只清空，不调用 shutdown
         self.bus = self.create_can_bus()
 
     def send_command(self, motor_id, command_data):
@@ -566,7 +562,7 @@ class ServoDriveController:
                 time.sleep(0.05)
                 return
             except (can.CanError, OSError) as e:
-                rospy.logerr(f"CAN通信错误: {e}，尝试重连...")
+                rospy.logerr(f"motor:CAN通信错误: {e}")
                 self.reconnect_can_bus()
         rospy.logerr("CAN发送失败，已重试3次")
 
@@ -601,7 +597,7 @@ class ServoDriveController:
             try:
                 msg = self.bus.recv(timeout=0.1)
             except (can.CanError, OSError) as e:
-                rospy.logerr(f"CAN接收错误: {e}，尝试重连...")
+                rospy.logerr(f"motor:CAN通信错误: {e}")
                 self.reconnect_can_bus()
                 continue
             if msg and msg.arbitration_id == (0x580 + motor_id):
