@@ -549,7 +549,7 @@ class ServoDriveController:
 
     def reconnect_can_bus(self):
         """轻量级重连：只重建，不暴力关闭，不冲突"""
-        rospy.warn("motor:CAN 链路失效，尝试重建连接...")
+        rospy.logwarn("motor:CAN 链路失效，尝试重建连接...")
         self.bus = None  # 只清空，不调用 shutdown
         self.bus = self.create_can_bus()
 
