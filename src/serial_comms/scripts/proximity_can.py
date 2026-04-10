@@ -74,7 +74,7 @@ class DigitalInputReader:
 
     def reconnect_can_bus(self):
         """轻量级重连：只重建，不暴力关闭，不冲突"""
-        rospy.warn("proximity sensor:CAN 链路失效，尝试重建连接...")
+        rospy.logwarn("proximity sensor:CAN 链路失效，尝试重建连接...")
         self.bus = None  # 只清空，不调用 shutdown
         self._init_can()
 
