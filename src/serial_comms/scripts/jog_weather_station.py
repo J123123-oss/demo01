@@ -14,7 +14,7 @@ from serial_comms.msg import Environment  # 气象站消息类型
 # ===================== 公共配置 =====================
 SERIAL_PORT = "/dev/jog-weather"  # 共享串口
 # SERIAL_PORT = "/dev/ttyUSB0"  # 共享串口
-BAUDRATE = 9600  
+BAUDRATE = 9600
 PARITY = "N"
 STOPBITS = 1
 BYTESIZE = 8
@@ -39,6 +39,8 @@ SENSOR_RESET_MASK = (1 << SENSOR1_BIT)  # 可修改为SENSOR1_BIT
 # 电机轮询参数
 JOG_INTERVAL = 0.015       # JOG指令发送周期（15ms）
 MOTOR_LOOP_INTERVAL = 0.001   # 电机控制循环间隔
+# 传感器读取参数（独立线程）
+SENSOR_READ_INTERVAL = 0.1  # 100ms读取一次传感器，保证实时性
 
 # ===================== 气象站配置 =====================
 WEATHER_SLAVE_ID = 9           # 气象站从站地址
@@ -58,6 +60,9 @@ modbus_lock = threading.Lock()  # 总线互斥锁
 # 电机状态
 motor_is_running = False
 motor_current_direction = "STOP"  # STOP/FORWARD/REVERSE
+# 传感器实时状态（独立线程共享）
+sensor_trigger_value = 0
+io_status = 0
 # MQTT状态
 mqtt_completed = False
 mqtt_running_state = ""
@@ -65,7 +70,7 @@ mqtt_running_state = ""
 class JogWeatherControlNode:
     def __init__(self):
         rospy.init_node("jog_weather_control_node", anonymous=True)
-        rospy.loginfo("电机+气象站+MQTT联合控制节点启动...")
+        rospy.loginfo("电机JOG控制+气象站节点启动...")
 
         # 1. 初始化Modbus客户端
         self.init_modbus_client()
@@ -82,9 +87,6 @@ class JogWeatherControlNode:
         self.start_reverse_service = rospy.Service("/start_reverse_jog", Trigger, self.start_reverse_callback)
         self.stop_jog_service = rospy.Service("/stop_jog", Trigger, self.stop_jog_callback)
         rospy.loginfo("电机服务就绪：/start_forward_jog /start_reverse_jog /stop_jog")
-        self.trigger_value = 0
-        self.io_status = 0
-
 
         # 5. 订阅MQTT JSON消息话题
         # self.mqtt_sub = rospy.Subscriber(MQTT_TOPIC, String, self.mqtt_state_callback, queue_size=10)
@@ -96,7 +98,13 @@ class JogWeatherControlNode:
         weather_thread.start()
         rospy.loginfo(f"气象站发布线程已启动（频率：{WEATHER_PUBLISH_RATE}Hz）")
 
-        # 7. 启动电机控制主线程
+        # 7. 启动【独立传感器读取线程】——核心改造1
+        sensor_thread = threading.Thread(target=self.sensor_read_loop)
+        sensor_thread.daemon = True
+        sensor_thread.start()
+        rospy.loginfo("传感器实时读取线程已启动（5ms周期）")
+
+        # 8. 启动电机控制主线程
         motor_thread = threading.Thread(target=self.motor_control_loop)
         motor_thread.daemon = True
         motor_thread.start()
@@ -107,21 +115,98 @@ class JogWeatherControlNode:
     def init_modbus_client(self):
         """初始化Modbus客户端"""
         global client
-        client = ModbusSerialClient(
-            method='rtu',
-            port=SERIAL_PORT,
-            baudrate=BAUDRATE,
-            parity=PARITY,
-            stopbits=STOPBITS,
-            bytesize=BYTESIZE,
-            timeout=TIMEOUT
-        )
+        try:
+            client = ModbusSerialClient(
+                method='rtu',
+                port=SERIAL_PORT,
+                baudrate=BAUDRATE,
+                parity=PARITY,
+                stopbits=STOPBITS,
+                bytesize=BYTESIZE,
+                timeout=TIMEOUT
+            )
 
-        if not client.connect():
-            rospy.logfatal("无法连接到Modbus设备，请检查串口和参数！")
-            rospy.signal_shutdown("连接失败")
-            return
-        rospy.loginfo("Modbus设备连接成功")
+            if not client.connect():
+                rospy.logfatal("无法连接到Modbus设备，请检查串口和参数！")
+                rospy.signal_shutdown("连接失败")
+                return
+            rospy.loginfo("Modbus设备连接成功")
+        except Exception as e:
+            rospy.logerr(f"Modbus初始化异常：{str(e)}")
+            client = None
+
+    def reinit_modbus_client(self):
+        """Modbus串口自动重连函数——核心改造2"""
+        global client
+        rospy.logerr("Modbus通信异常，尝试重新连接串口...")
+        
+        # 先关闭旧连接
+        try:
+            if client:
+                client.close()
+                time.sleep(0.1)
+        except:
+            pass
+        
+        # 重新初始化
+        self.init_modbus_client()
+        time.sleep(0.2)
+        
+        if client and client.connected:
+            rospy.loginfo("✅ Modbus串口重连成功！")
+            return True
+        else:
+            rospy.logerr("❌ Modbus串口重连失败！")
+            return False
+
+    # ===================== 独立传感器读取循环（时刻读取） =====================
+    def sensor_read_loop(self):
+        """独立线程：高频实时读取电机传感器，与电机控制完全分离"""
+        global io_status, sensor_trigger_value
+        while not rospy.is_shutdown():
+            try:
+                # 读取IO状态
+                with modbus_lock:
+                    if not client or not client.connected:
+                        self.reinit_modbus_client()
+                        time.sleep(0.5)
+                        continue
+                        
+                    response = client.read_holding_registers(
+                        address=IO_STATUS_REG,
+                        count=1,
+                        slave=MOTOR_SLAVE_ID
+                    )
+
+                if response.isError():
+                    rospy.logwarn(f"传感器读取失败：{response}")
+                    time.sleep(SENSOR_READ_INTERVAL)
+                    continue
+
+                # 更新全局状态
+                current_io = response.registers[0]
+                io_status = current_io
+
+                # 根据电机方向计算触发值
+                if motor_current_direction == "FORWARD":
+                    sensor_trigger_value = io_status & SENSOR_TRIGGERED_MASK
+                elif motor_current_direction == "REVERSE":
+                    sensor_trigger_value = io_status & SENSOR_RESET_MASK
+                else:
+                    sensor_trigger_value = 0
+
+                # 实时日志输出
+                if sensor_trigger_value != 0:
+                    rospy.logdebug(f"传感器触发：IO=0x{io_status:04X}, 触发值={sensor_trigger_value}")
+
+            except ModbusException as e:
+                rospy.logerr(f"传感器Modbus异常：{e}")
+                self.reinit_modbus_client()
+            except Exception as e:
+                rospy.logerr(f"传感器读取未知错误：{str(e)}")
+                self.reinit_modbus_client()
+
+            time.sleep(SENSOR_READ_INTERVAL)
 
     # ===================== 电机控制核心方法 =====================
     def set_motor_jog_speed(self, speed):
@@ -132,6 +217,10 @@ class JogWeatherControlNode:
 
         try:
             with modbus_lock:
+                if not client or not client.connected:
+                    self.reinit_modbus_client()
+                    return
+                    
                 response = client.write_register(
                     address=JOG_SPEED_REG,
                     value=speed,
@@ -143,51 +232,18 @@ class JogWeatherControlNode:
                 rospy.logerr(f"速度设置失败：{response}")
         except ModbusException as e:
             rospy.logerr(f"Modbus错误（设置速度）：{e}")
+            self.reinit_modbus_client()
         except Exception as e:
             rospy.logerr(f"未知错误（设置速度）：{str(e)}")
-
-    def read_motor_sensor(self):
-        """读取电机传感器状态，返回传感器触发掩码值（io_status & SENSOR_TRIGGERED_MASK）"""
-        try:
-            with modbus_lock:
-                response = client.read_holding_registers(
-                    address=IO_STATUS_REG,
-                    count=1,
-                    slave=MOTOR_SLAVE_ID
-                )
-            if response.isError():
-                rospy.logerr(f"读取传感器失败：{response}")
-                return 0  # 读取失败时返回0
-            self.io_status = response.registers[0]
-            if motor_current_direction == "FORWARD":
-                self.trigger_value = self.io_status & SENSOR_TRIGGERED_MASK  # 计算触发掩码值
-            elif motor_current_direction == "REVERSE":
-                self.trigger_value = self.io_status & SENSOR_RESET_MASK  # 计算重置掩码值
-            else:
-                rospy.logdebug("无效的电机方向")
-                return 0
-            # 日志输出触发状态
-            if self.trigger_value == SENSOR_TRIGGERED_MASK:
-                rospy.loginfo(f"到位传感器触发！IO状态：0x{self.io_status:04X}，触发掩码值：{self.trigger_value}")
-            else:
-                s1 = (self.io_status & (1 << SENSOR1_BIT)) != 0
-                s2 = (self.io_status & (1 << SENSOR2_BIT)) != 0
-                s3 = (self.io_status & (1 << SENSOR3_BIT)) != 0
-                rospy.loginfo(f"传感器状态 - 1：{s1}，2：{s2}，3：{s3}，触发掩码值：{self.trigger_value}")
-            
-            return self.trigger_value  # 返回实际的掩码计算值
-
-        except ModbusException as e:
-            rospy.logerr(f"Modbus错误（读取传感器）：{e}")
-            return 0  # 异常时返回0
-        except Exception as e:
-            rospy.logerr(f"未知错误（读取传感器）：{str(e)}")
-            return 0  # 异常时返回0
 
     def send_motor_jog_cmd(self, cmd):
         """发送电机JOG指令"""
         try:
             with modbus_lock:
+                if not client or not client.connected:
+                    self.reinit_modbus_client()
+                    return False
+                    
                 response = client.write_register(
                     address=CTRL_WORD_REG,
                     value=cmd,
@@ -198,14 +254,16 @@ class JogWeatherControlNode:
             return not response.isError()
         except ModbusException as e:
             rospy.logerr(f"Modbus错误（发送JOG）：{e}")
+            self.reinit_modbus_client()
             return False
         except Exception as e:
             rospy.logerr(f"未知错误（发送JOG）：{str(e)}")
             return False
 
     def motor_control_loop(self):
-        """电机控制主循环"""
+        """电机控制主循环（已移除传感器读取）"""
         global motor_is_running, motor_current_direction
+        global sensor_trigger_value, io_status
         last_jog_send_time = time.time()
 
         while not rospy.is_shutdown():
@@ -221,14 +279,15 @@ class JogWeatherControlNode:
                         self.send_motor_jog_cmd(REVERSE_JOG_CMD)
                         rospy.logdebug("发送反向JOG指令")
                     last_jog_send_time = current_time
-                self.read_motor_sensor()
+
+                # 直接使用独立线程读取的实时传感器数据
                 # 前进到位
-                if motor_current_direction == "FORWARD" and self.read_motor_sensor() == SENSOR_TRIGGERED_MASK:
+                if motor_current_direction == "FORWARD" and sensor_trigger_value == SENSOR_TRIGGERED_MASK:
                     motor_current_direction = "STOP"
                     rospy.loginfo("前进至传感器触发,STOP")
 
                 # 后退到位
-                if motor_current_direction == "REVERSE" and self.read_motor_sensor() == SENSOR_RESET_MASK :
+                if motor_current_direction == "REVERSE" and sensor_trigger_value == SENSOR_RESET_MASK:
                     motor_current_direction = "STOP"
                     rospy.loginfo("后退至传感器触发,STOP")
 
@@ -240,13 +299,10 @@ class JogWeatherControlNode:
                 self.send_motor_jog_cmd(STOP_CMD)
                 motor_current_direction = "STOP"
                 self.motor_status_pub.publish(Bool(data=False))
-                # 2. 读取传感器状态并发布（核心新增逻辑）
-                sensor_trigger_value = self.io_status
-                
 
-            # 构建UInt8消息并发布
+            # 发布实时传感器数据
             sensors_msg = UInt8()
-            sensors_msg.data = self.io_status
+            sensors_msg.data = io_status
             self.proximity_sensors_pub.publish(sensors_msg)
             time.sleep(MOTOR_LOOP_INTERVAL)
 
@@ -288,6 +344,10 @@ class JogWeatherControlNode:
         """读取保持寄存器"""
         try:
             with modbus_lock:
+                if not client or not client.connected:
+                    self.reinit_modbus_client()
+                    return None
+                    
                 response = client.read_holding_registers(
                     address=addr,
                     count=count,
@@ -299,6 +359,7 @@ class JogWeatherControlNode:
             return response.registers
         except ModbusException as e:
             rospy.logwarn(f"Modbus通信异常: {str(e)}")
+            self.reinit_modbus_client()
             return None
         except Exception as e:
             rospy.logwarn(f"未知错误: {str(e)}")

@@ -93,6 +93,7 @@ class ServoDriveController:
 
         self.last_mqtt_completed = False  # 保存上一次 complete_state 状态，用于脉冲沿检测
         self.last_mqtt_status = ""  # 保存上一次 status 状态，用于脉冲沿检测
+        self.last_mqtt_full_charge = False  # 新增
         self.mqtt_completed = False
         self.mqtt_running_state = "START"
 
@@ -308,44 +309,46 @@ class ServoDriveController:
     
     def process_mqtt_state(self, msg_data):
         """解析MQTT JSON消息并控制电机（核心处理逻辑）"""
-        
         try:
             mqtt_data = json.loads(msg_data)
             if "complete_state" not in mqtt_data and "status" not in mqtt_data:
                 rospy.logwarn(f"Ignore: {msg_data}")
                 return
-            
+
             self.mqtt_completed = mqtt_data.get("complete_state", False)
-            self.mqtt_running_state = mqtt_data.get("status", "START")  # 手动赋值默认值为START状态，后期修改
+            self.mqtt_running_state = mqtt_data.get("status", "START")
             mqtt_full_charge = mqtt_data.get("full_charge", False)
+
             rospy.loginfo(f"解析MQTT消息：complete_state={self.mqtt_completed}, status={self.mqtt_running_state}, full_charge={mqtt_full_charge}")
 
-            # 脉冲沿检测：只有状态发生变化时才触发，避免重复启动
-            # 1. complete_state 从 False 变为 True：启动正向JOG（上升沿检测）
-            if self.mqtt_completed and not self.last_mqtt_completed and self.mqtt_running_state != "START":
+            # ================= 上升沿检测 =================
+            complete_rising = self.mqtt_completed and not self.last_mqtt_completed
+            status_changed = self.mqtt_running_state != self.last_mqtt_status
+            full_charge_rising = mqtt_full_charge and not self.last_mqtt_full_charge
+
+            # 1. complete_state 从 False → True：正向JOG
+            if complete_rising and self.mqtt_running_state != "START":
                 rospy.loginfo("MQTT指令：complete_state=True（上升沿），启动正向JOG")
                 self.call_ros_service("/start_forward_jog")
                 self.set_state("START")
 
-            
-            # 2. status 从非"START"变为"START"：启动反向JOG（上升沿检测）
-            if self.mqtt_running_state == "START" and self.last_mqtt_status != "START" or \
-                self.mqtt_running_state == "UNLOADING" and self.last_mqtt_status != "UNLOADING" or \
-                self.mqtt_running_state == "LOADING" and self.last_mqtt_status != "LOADING" or \
-                mqtt_full_charge:
-                
-                rospy.loginfo("MQTT指令：status=START（上升沿），启动反向JOG")
+            # 2. 以下情况触发反向JOG（互斥执行）
+            elif (self.mqtt_running_state == "START" and status_changed) or \
+                (self.mqtt_running_state == "UNLOADING" and status_changed) or \
+                (self.mqtt_running_state == "LOADING" and status_changed) or \
+                full_charge_rising:
+
+                rospy.loginfo("MQTT指令：启动反向JOG")
                 self.call_ros_service("/start_reverse_jog")
                 self.set_state("START")
-                
-                
 
-            # 更新保存的状态
+            # ================= 更新历史状态 =================
             self.last_mqtt_completed = self.mqtt_completed
             self.last_mqtt_status = self.mqtt_running_state
+            self.last_mqtt_full_charge = mqtt_full_charge
 
         except json.JSONDecodeError as e:
-            rospy.logwarn(f"MQTT消息JSON解析失败：{str(e)}，原始消息：{msg.data}")
+            rospy.logwarn(f"MQTT消息JSON解析失败：{str(e)}，原始消息：{msg_data}")
         except Exception as e:
             rospy.logwarn(f"MQTT消息处理异常：{str(e)}")
 
@@ -469,6 +472,7 @@ class ServoDriveController:
                 "wind_direction": self.wind_direction,
                 "illuminance": self.illuminance,
                 "rainfall":self.rainfall,
+                "rate":5 if self.current_status == "STOP" else 10,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
                 "timestamp_to_robot": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
@@ -1189,7 +1193,7 @@ class ServoDriveController:
         if self.current_status == "STOP":
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-            self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
+            self.publish_timer = rospy.Timer(rospy.Duration(10), lambda event: self.publish_state())
             # if self.fault_check_timer is not None:
                 # self.fault_check_timer.shutdown()
             # self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
