@@ -402,7 +402,7 @@ class ServoDriveController:
             self.elevator_stage = 0
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(20.0), lambda event: self.publish_state())
                     # 1. 防止重复启动线程（若已运行则先停止）
                 # self.stop_heartbeat()
             # if self.fault_check_timer is not None:    
@@ -1193,7 +1193,7 @@ class ServoDriveController:
         if self.current_status == "STOP":
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-            self.publish_timer = rospy.Timer(rospy.Duration(10), lambda event: self.publish_state())
+            self.publish_timer = rospy.Timer(rospy.Duration(5), lambda event: self.publish_state())
             # if self.fault_check_timer is not None:
                 # self.fault_check_timer.shutdown()
             # self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())

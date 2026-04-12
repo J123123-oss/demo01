@@ -161,7 +161,7 @@ class JogWeatherControlNode:
 
     # ===================== 独立传感器读取循环（时刻读取） =====================
     def sensor_read_loop(self):
-        """独立线程：高频实时读取电机传感器，与电机控制完全分离"""
+        """读取电机传感器值,单独查询"""
         global io_status, sensor_trigger_value
         while not rospy.is_shutdown():
             try:
