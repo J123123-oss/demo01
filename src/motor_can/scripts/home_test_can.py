@@ -330,7 +330,7 @@ class ServoDriveController:
             if complete_rising and self.mqtt_running_state != "START":
                 rospy.loginfo("MQTT指令：complete_state=True（上升沿），启动正向JOG")
                 self.call_ros_service("/start_forward_jog")
-                self.set_state("START")
+                self.set_state("STOP")
 
             # 2. 以下情况触发反向JOG（互斥执行）
             elif (self.mqtt_running_state == "START" and status_changed) or \
@@ -340,7 +340,7 @@ class ServoDriveController:
 
                 rospy.loginfo("MQTT指令：启动反向JOG")
                 self.call_ros_service("/start_reverse_jog")
-                self.set_state("START")
+                self.set_state("STOP")
 
             # ================= 更新历史状态 =================
             self.last_mqtt_completed = self.mqtt_completed
@@ -402,14 +402,14 @@ class ServoDriveController:
             self.elevator_stage = 0
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-                self.publish_timer = rospy.Timer(rospy.Duration(20.0), lambda event: self.publish_state())
+                self.publish_timer = rospy.Timer(rospy.Duration(5.0), lambda event: self.publish_state())
                     # 1. 防止重复启动线程（若已运行则先停止）
                 # self.stop_heartbeat()
             # if self.fault_check_timer is not None:    
                 # self.fault_check_timer.shutdown()
                 # self.fault_check_timer = rospy.Timer(rospy.Duration(60.0), lambda event: self.check_and_clear_faults())
 
-            threading.Thread(target=self.delayed_publish_freq_switch,args=(10,),daemon=True).start()
+            threading.Thread(target=self.delayed_publish_freq_switch,args=(180,),daemon=True).start()
         else: #其他状态保持原频率
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
@@ -472,7 +472,7 @@ class ServoDriveController:
                 "wind_direction": self.wind_direction,
                 "illuminance": self.illuminance,
                 "rainfall":self.rainfall,
-                "rate":5 if self.current_status == "STOP" else 10,
+                "rate": self.current_status,
                 # "auto_step": self.auto_step, # 当前自动程序所在状态
                 "timestamp_to_robot": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # 2025-07-15 14:58:43
             }
@@ -1193,7 +1193,7 @@ class ServoDriveController:
         if self.current_status == "STOP":
             if self.publish_timer is not None:
                 self.publish_timer.shutdown()
-            self.publish_timer = rospy.Timer(rospy.Duration(5), lambda event: self.publish_state())
+            self.publish_timer = rospy.Timer(rospy.Duration(1800), lambda event: self.publish_state())
             # if self.fault_check_timer is not None:
                 # self.fault_check_timer.shutdown()
             # self.fault_check_timer = rospy.Timer(rospy.Duration(7200), lambda event: self.check_and_clear_faults())
@@ -1453,7 +1453,7 @@ def main():
     try:
     # 每0.05秒执行一次状态执行器
         rospy.Timer(rospy.Duration(0.05), controller.execute_state)
-        controller.set_state("START")
+        controller.set_state("STOP")
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("程序终止")
